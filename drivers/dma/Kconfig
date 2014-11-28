@@ -381,20 +381,6 @@ config FSL_EDMA
 
 source "drivers/dma/xilinx/Kconfig"
 
-config XILINX_VDMA
-	tristate "Xilinx AXI VDMA Engine"
-	depends on (ARCH_ZYNQ || MICROBLAZE)
-	select DMA_ENGINE
-	help
-	  Enable support for Xilinx AXI VDMA Soft IP.
-
-	  This engine provides high-bandwidth direct memory access
-	  between memory and AXI4-Stream video type target
-	  peripherals including peripherals which support AXI4-
-	  Stream Video Protocol.  It has two stream interfaces/
-	  channels, Memory Mapped to Stream (MM2S) and Stream to
-	  Memory Mapped (S2MM) for the data transfers.
-
 config DMA_SUN6I
 	tristate "Allwinner A31 SoCs DMA support"
 	depends on MACH_SUN6I || COMPILE_TEST

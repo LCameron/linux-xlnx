@@ -24,9 +24,23 @@ config XILINX_DMATEST
 	  Simple DMA test client. Say N unless you're debugging a
 	  DMA Device driver.
 
+config XILINX_VDMA
+	tristate "Xilinx AXI VDMA Engine"
+	depends on (ARCH_ZYNQ || MICROBLAZE)
+	select DMA_ENGINE
+	help
+	  Enable support for Xilinx AXI VDMA Soft IP.
+
+	  This engine provides high-bandwidth direct memory access
+	  between memory and AXI4-Stream video type target
+	  peripherals including peripherals which support AXI4-
+	  Stream Video Protocol.  It has two stream interfaces/
+	  channels, Memory Mapped to Stream (MM2S) and Stream to
+	  Memory Mapped (S2MM) for the data transfers.
+
 config XILINX_VDMATEST
 	tristate "DMA Test client for VDMA"
-	depends on XILINX_AXIVDMA
+	depends on XILINX_VDMA
 	help
 	  Simple DMA test client. Say N unless you're debugging a
 	  DMA Device driver.
