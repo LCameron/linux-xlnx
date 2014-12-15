@@ -2189,6 +2189,9 @@ config FB_XILINX
 	  framebuffer. ML300 carries a 640*480 LCD display on the board,
 	  ML403 uses a standard DB15 VGA connector.
 
+#Leigh Cameron, Tactical Research 2014.  Patched in Xylon drivers.
+source "drivers/video/fbdev/xylon/Kconfig"
+
 config FB_GOLDFISH
 	tristate "Goldfish Framebuffer"
 	depends on FB && HAS_DMA && (GOLDFISH || COMPILE_TEST)

@@ -14,6 +14,8 @@
  * GNU General Public License for more details.
  */
 
+#define DEBUG 1
+
 #include <drm/drmP.h>
 
 #include <linux/device.h>
@@ -242,13 +244,21 @@ static u32 xylon_cvc_get_reg(void __iomem *base,
 			     unsigned long offset,
 			     struct xylon_cvc_layer_data *layer_data)
 {
-	return readl(base + offset);
+	u32 ret;
+	ret = readl(base + offset);
+#ifdef DEBUG
+	printk(KERN_DEBUG "logicvc read: %08X %08X\n",base+offset,ret);
+#endif
+	return ret;
 }
 
 static void xylon_cvc_set_reg(u32 value, void __iomem *base,
 			      unsigned long offset,
 			      struct xylon_cvc_layer_data *layer_data)
 {
+#ifdef DEBUG
+	printk(KERN_DEBUG "logicvc write: %08X %08X\n",base+offset,value);
+#endif
 	writel(value, base + offset);
 }
 
@@ -909,6 +919,7 @@ void xylon_cvc_get_fix_parameters(struct xylon_cvc *cvc,
 static const struct of_device_id cvc_of_match[] = {
 	{ .compatible = "xylon,logicvc-4.00.a" },
 	{ .compatible = "xylon,logicvc-4.01.a" },
+	{ .compatible = "xylon,logicvc-4.01.b" },
 	{/* end of table */}
 };
 
