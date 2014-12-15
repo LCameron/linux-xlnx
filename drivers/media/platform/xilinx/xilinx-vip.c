@@ -36,6 +36,10 @@ static const struct xvip_video_format xvip_video_formats[] = {
 	  "Bayer 8-bit GBRG" },
 	{ "bggr", 8, 1, V4L2_MBUS_FMT_SBGGR8_1X8, V4L2_PIX_FMT_SBGGR8,
 	  "Bayer 8-bit BGGR" },
+	{ "y8", 8, 1, V4L2_MBUS_FMT_Y8_1X8, V4L2_PIX_FMT_GREY, 
+	  "Greyscale 8-bit Y" },
+	{ "y16", 8, 2, V4L2_MBUS_FMT_Y16_1X16, V4L2_PIX_FMT_Y16,
+	  "Greyscale 16-bit YY" },
 };
 
 /**

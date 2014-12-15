@@ -16,6 +16,7 @@
 #include <linux/io.h>
 #include <media/v4l2-subdev.h>
 
+#define DEBUG 1
 /*
  * Minimum and maximum width and height common to most video IP cores. IP
  * cores with different requirements must define their own values.
