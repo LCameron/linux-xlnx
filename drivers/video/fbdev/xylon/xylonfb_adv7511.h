@@ -1,11 +1,9 @@
 /*
- * Xylon DRM encoder functions header
+ * Xylon logiCVC frame buffer driver miscellaneous ADV7511 functionality
+ * header file
  *
  * Copyright (C) 2014 Xylon d.o.o.
  * Author: Davor Joja <davor.joja@logicbricks.com>
- *
- * Reused Xilinx DRM encoder header.
- * Copyright (C) 2013 Xilinx, Inc.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -17,9 +15,12 @@
  * GNU General Public License for more details.
  */
 
-#ifndef _XYLON_DRM_ENCODER_H_
-#define _XYLON_DRM_ENCODER_H_
+#ifndef __XYLONFB_MISC_ADV7511_H__
+#define __XYLONFB_MISC_ADV7511_H__
 
-struct drm_encoder *xylon_drm_encoder_create(struct drm_device *dev);
+#include <linux/fb.h>
 
-#endif /* _XYLON_DRM_ENCODER_H_ */
+int xylonfb_adv7511_register(struct fb_info *fbi);
+void xylonfb_adv7511_unregister(struct fb_info *fbi);
+
+#endif /* #ifndef __XYLONFB_MISC_ADV7511_H__ */

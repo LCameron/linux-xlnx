@@ -1,11 +1,9 @@
 /*
- * Xylon DRM encoder functions header
+ * Xylon logiCVC frame buffer driver miscellaneous interface functionality
+ * header file
  *
  * Copyright (C) 2014 Xylon d.o.o.
  * Author: Davor Joja <davor.joja@logicbricks.com>
- *
- * Reused Xilinx DRM encoder header.
- * Copyright (C) 2013 Xilinx, Inc.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -17,9 +15,19 @@
  * GNU General Public License for more details.
  */
 
-#ifndef _XYLON_DRM_ENCODER_H_
-#define _XYLON_DRM_ENCODER_H_
+#ifndef __XYLONFB_MISC__
+#define __XYLONFB_MISC__
 
-struct drm_encoder *xylon_drm_encoder_create(struct drm_device *dev);
+#include <linux/fb.h>
 
-#endif /* _XYLON_DRM_ENCODER_H_ */
+struct xylonfb_misc_data {
+	wait_queue_head_t wait;
+	struct fb_var_screeninfo *var_screeninfo;
+	struct fb_monspecs *monspecs;
+	u8 *edid;
+};
+
+void xylonfb_misc_init(struct fb_info *fbi);
+void xylonfb_misc_deinit(struct fb_info *fbi);
+
+#endif /* #ifndef __XYLONFB_MISC__ */
