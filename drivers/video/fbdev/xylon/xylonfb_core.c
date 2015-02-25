@@ -14,7 +14,7 @@
  * GNU General Public License for more details.
  */
 
-#define DEBUG 1
+/* #define DEBUG 1  */
 
 #include <linux/console.h>
 #include <linux/delay.h>
@@ -1281,6 +1281,11 @@ static void xylonfb_logicvc_layer_enable(struct fb_info *fbi, bool enable)
 	ld->data->reg_access.set_reg_val(reg, ld->base,
 					 LOGICVC_LAYER_CTRL_ROFF,
 					 ld);
+
+	/* Latest core seems to need layer address re-set after enabling */
+	ld->data->reg_access.set_reg_val(ld->fb_pbase_active, ld->base,
+				     LOGICVC_LAYER_ADDR_ROFF, ld);
+
 }
 
 static void xylonfb_enable_logicvc_output(struct fb_info *fbi)
