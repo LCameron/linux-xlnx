@@ -28,7 +28,7 @@
 #define XYLONFB_DRIVER_DESCRIPTION "Xylon logiCVC frame buffer driver"
 #define XYLONFB_DRIVER_VERSION "3.0"
 
-#define DEBUG_LEVEL	1
+#define DEBUG_LEVEL	0
 #define CORE		1
 #define INFO		2
 

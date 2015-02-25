@@ -14,6 +14,8 @@
  * GNU General Public License for more details.
  */
 
+#define DEBUG 1
+
 #include <linux/console.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
@@ -70,12 +72,20 @@ static void xylonfb_fbi_update(struct fb_info *fbi);
 static u32 xylonfb_get_reg(void __iomem *base, unsigned long offset,
 			   struct xylonfb_layer_data *ld)
 {
-	return readl(base + offset);
+	u32 ret;
+	ret = readl(base + offset);
+#ifdef DEBUG
+	printk(KERN_DEBUG "logicvc read: %08X %08X\n",base+offset,ret);
+#endif
+	return ret;
 }
 
 static void xylonfb_set_reg(u32 value, void __iomem *base, unsigned long offset,
 			    struct xylonfb_layer_data *ld)
 {
+#ifdef DEBUG
+	printk(KERN_DEBUG "logicvc write: %08X %08X\n",base+offset,value);
+#endif
 	writel(value, (base + offset));
 }
 
@@ -83,15 +93,23 @@ static unsigned long xylonfb_get_reg_mem_addr(void __iomem *base,
 					      unsigned long offset,
 					      struct xylonfb_layer_data *ld)
 {
+
 	unsigned long ordinal = offset >> 3;
+	u32 ret;
 
 	if ((unsigned long)base - (unsigned long)ld->data->dev_base) {
-		return (unsigned long)(&ld->reg_list->hpos) +
+		ret = (unsigned long)(&ld->reg_list->hpos) +
 				       (ordinal * sizeof(unsigned long));
 	} else {
-		return (unsigned long)(&ld->data->reg_list->dtype) +
+		ret = (unsigned long)(&ld->data->reg_list->dtype) +
 				       (ordinal * sizeof(unsigned long));
 	}
+
+#ifdef DEBUG
+	printk(KERN_DEBUG "logicvc read addr: %08X %08X\n",base+offset,ret);
+#endif
+	return ret;
+
 }
 
 static u32 xylonfb_get_reg_mem(void __iomem *base, unsigned long offset,
@@ -108,6 +126,11 @@ static void xylonfb_set_reg_mem(u32 value, void __iomem *base,
 		(unsigned long *)xylonfb_get_reg_mem_addr(base, offset, ld);
 	*reg_mem_addr = value;
 	writel((*reg_mem_addr), (base + offset));
+
+#ifdef DEBUG
+	printk(KERN_DEBUG "logicvc write addr: %08X %08X\n",base+offset,value);
+#endif
+
 }
 
 static irqreturn_t xylonfb_isr(int irq, void *dev_id)
@@ -1205,6 +1228,8 @@ static int xylonfb_vmem_init(struct xylonfb_layer_data *ld, int id, bool *mmap)
 	}
 
 	ld->fb_pbase_active = ld->fb_pbase;
+
+	XYLONFB_DBG(CORE, "frame buffer at: %08x\n", ld->fb_base);
 
 	*mmap = false;
 

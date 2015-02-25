@@ -4,6 +4,24 @@ config DRM_XYLON
 	select DRM_KMS_HELPER
 	select DRM_KMS_CMA_HELPER
 	select DRM_GEM_CMA_HELPER
-	select DRM_ENCODER_ADV7511
 	help
 	  DRM display driver for xylon logiCVC IP core.
+
+
+choice 
+	prompt "Encoder Type"
+	default DRM_XYLON_ADV7511
+	depends on DRM_XYLON
+
+config DRM_XYLON_DUMMYENC
+	bool "Dummy encoder support"
+	help
+	  Use this when the raw video out goes straight to the display, i.e. no encoder chip is used.
+
+config DRM_XYLON_ADV7511
+	bool "ADV7511 encoder support"
+	select DRM_ENCODER_ADV7511
+	help
+	  Use this to control an ADV7511 connected to the display outputs.
+
+endchoice

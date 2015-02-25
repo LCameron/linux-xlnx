@@ -110,7 +110,7 @@ int xylon_drm_plane_fb_set(struct drm_plane *base_plane,
 	if (fb->pixel_format != base_plane->format_types[0]) {
 		DRM_ERROR("unsupported pixel format %08x %08x\n",
 			  fb->pixel_format, base_plane->format_types[0]);
-		return -EINVAL;
+//		return -EINVAL;
 	}
 
 	gem_obj = xylon_drm_fb_get_gem_obj(fb);
@@ -338,7 +338,10 @@ xylon_drm_plane_create(struct xylon_drm_plane_manager *manager,
 	plane->manager = manager;
 	manager->plane[i] = plane;
 
+	DRM_INFO("about to create properties %d\n",i);
 	xylon_drm_plane_create_properties(&plane->base);
+
+	DRM_INFO("about to init properties %d\n",i);
 
 	xylon_drm_plane_properties_initial_value(&plane->base);
 
@@ -361,6 +364,8 @@ int xylon_drm_plane_create_all(struct xylon_drm_plane_manager *manager,
 	for (i = 0; i < manager->planes; i++) {
 		if (manager->plane[i])
 			continue;
+
+		DRM_INFO("creating plane %d\n",i);
 
 		primary = false;
 		if (i == primary_id)
@@ -476,7 +481,7 @@ xylon_drm_plane_probe_manager(struct drm_device *drm_dev,
 
 	manager->plane = plane;
 
-	DRM_DEBUG("%d %s\n", manager->planes,
+	DRM_INFO("%d %s\n", manager->planes,
 		  manager->planes == 1 ? "plane" : "planes");
 
 	return manager;

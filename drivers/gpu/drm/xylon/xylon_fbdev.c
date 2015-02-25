@@ -76,6 +76,9 @@ static int xylon_drm_fbdev_create(struct drm_fb_helper *helper,
 	if (IS_ERR(obj))
 		return -ENOMEM;
 
+	DRM_INFO("cma gem allocate: p %08x v %08x \n", obj->paddr, obj->vaddr);
+
+
 	fb = xylon_drm_fb_init(dev, &mode_cmd, &obj->base);
 	if (IS_ERR(fb)) {
 		DRM_ERROR("failed initialize fb\n");
@@ -139,6 +142,8 @@ xylon_drm_fbdev_init(struct drm_device *dev,
 	struct drm_fb_helper *helper;
 	struct xylon_drm_fb_device *fbdev;
 	int ret;
+
+	DRM_INFO("xylon_drm_fbdev_init %d %d\n",num_crtc,max_conn_count);
 
 	fbdev = kzalloc(sizeof(*fbdev), GFP_KERNEL);
 	if (!fbdev) {

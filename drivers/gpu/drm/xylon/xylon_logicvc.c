@@ -130,6 +130,8 @@
 
 /* logiCVC control registers initial values */
 #define LOGICVC_DTYPE_REG_INIT 0
+#define LOGICVC_POWER_CTRL_ON 0xf
+#define LOGICVC_POWER_CTRL_OFF 0x0
 
 /* logiCVC various definitions */
 #define LOGICVC_MAJOR_REVISION_SHIFT	11
@@ -248,7 +250,7 @@ static u32 xylon_cvc_get_reg(void __iomem *base,
 	u32 ret;
 	ret = readl(base + offset);
 #ifdef DEBUG
-	printk(KERN_DEBUG "logicvc read: %08X %08X\n",base+offset,ret);
+	printk(KERN_DEBUG "logicvc read: %08X %08X\n",(unsigned int)base+offset,ret);
 #endif
 	return ret;
 }
@@ -258,7 +260,7 @@ static void xylon_cvc_set_reg(u32 value, void __iomem *base,
 			      struct xylon_cvc_layer_data *layer_data)
 {
 #ifdef DEBUG
-	printk(KERN_DEBUG "logicvc write: %08X %08X\n",base+offset,value);
+	printk(KERN_DEBUG "logicvc write: %08X %08X\n",(unsigned int)base+offset,value);
 #endif
 	writel(value, base + offset);
 }
@@ -268,15 +270,21 @@ xylon_cvc_get_reg_mem_addr(void __iomem *base, unsigned int offset,
 		           struct xylon_cvc_layer_data *layer_data)
 {
 	unsigned int ordinal = offset / LOGICVC_REG_STRIDE;
+	u32 ret;
 
 	if ((unsigned long)base - (unsigned long)layer_data->cvc->base) {
-		return (unsigned long)(&layer_data->regs) +
+		ret = (unsigned long)(&layer_data->regs) +
 			(ordinal * sizeof(u32));
 	} else {
 		ordinal -= (LOGICVC_CTRL_ROFF / LOGICVC_REG_STRIDE);
-		return (unsigned long)(&layer_data->cvc->regs) +
+		ret = (unsigned long)(&layer_data->cvc->regs) +
 				       (ordinal * sizeof(u32));
 	}
+
+#ifdef DEBUG
+	printk(KERN_DEBUG "logicvc read addr: %08X %08X\n",(unsigned int)base+offset,ret);
+#endif
+	return ret;
 }
 
 static u32 xylon_cvc_get_reg_mem(void __iomem *base, unsigned int offset,
@@ -295,6 +303,7 @@ static void xylon_cvc_set_reg_mem(u32 value, void __iomem *base,
 							    layer_data);
 	*reg_mem_addr = value;
 	writel((*reg_mem_addr), (base + offset));
+
 }
 
 unsigned int xylon_cvc_layer_get_total_count(struct xylon_cvc *cvc)
@@ -585,7 +594,8 @@ u32 xylon_cvc_int_get_active(struct xylon_cvc *cvc)
 
 void xylon_cvc_int_clear_active(struct xylon_cvc *cvc, u32 active)
 {
-	writel(active, cvc->base + LOGICVC_INT_STAT_ROFF);
+//	writel(active, cvc->base + LOGICVC_INT_STAT_ROFF);
+	xylon_cvc_set_reg(active, cvc->base, LOGICVC_INT_STAT_ROFF, NULL);
 }
 
 void xylon_cvc_int_hw_enable(struct xylon_cvc *cvc)
@@ -678,20 +688,23 @@ void xylon_cvc_enable(struct xylon_cvc *cvc, struct videomode *vmode)
 		vm = cvc->vmode;
 	}
 
-	writel(vm->hfront_porch - 1, base + LOGICVC_HSYNC_FRONT_PORCH_ROFF);
-	writel(vm->hsync_len - 1, base + LOGICVC_HSYNC_ROFF);
-	writel(vm->hback_porch - 1, base + LOGICVC_HSYNC_BACK_PORCH_ROFF);
-	writel(vm->hactive - 1, base + LOGICVC_HRES_ROFF);
-	writel(vm->vfront_porch - 1, base + LOGICVC_VSYNC_FRONT_PORCH_ROFF);
-	writel(vm->vsync_len - 1, base + LOGICVC_VSYNC_ROFF);
-	writel(vm->vback_porch - 1, base + LOGICVC_VSYNC_BACK_PORCH_ROFF);
-	writel(vm->vactive - 1, base + LOGICVC_VRES_ROFF);
+	xylon_cvc_set_reg(vm->hfront_porch - 1, base, LOGICVC_HSYNC_FRONT_PORCH_ROFF, NULL);
+	xylon_cvc_set_reg(vm->hsync_len - 1, base, LOGICVC_HSYNC_ROFF, NULL);
+	xylon_cvc_set_reg(vm->hback_porch - 1, base, LOGICVC_HSYNC_BACK_PORCH_ROFF, NULL);
+	xylon_cvc_set_reg(vm->hactive - 1, base, LOGICVC_HRES_ROFF, NULL);
+	xylon_cvc_set_reg(vm->vfront_porch - 1, base, LOGICVC_VSYNC_FRONT_PORCH_ROFF, NULL);
+	xylon_cvc_set_reg(vm->vsync_len - 1, base, LOGICVC_VSYNC_ROFF, NULL);
+	xylon_cvc_set_reg(vm->vback_porch - 1, base, LOGICVC_VSYNC_BACK_PORCH_ROFF, NULL);
+	xylon_cvc_set_reg(vm->vactive - 1, base, LOGICVC_VRES_ROFF, NULL);
 
 	cvc->reg_access.xylon_cvc_set_reg_val(cvc->ctrl, base,
 					      LOGICVC_CTRL_ROFF,
 					      layer_data);
 
-	writel(LOGICVC_DTYPE_REG_INIT, base + LOGICVC_DTYPE_ROFF);
+	xylon_cvc_set_reg(LOGICVC_POWER_CTRL_ON, base, LOGICVC_POWER_CTRL_ROFF, NULL);
+
+	xylon_cvc_set_reg(LOGICVC_DTYPE_REG_INIT, base, LOGICVC_DTYPE_ROFF, NULL);
+
 }
 
 void xylon_cvc_disable(struct xylon_cvc *cvc)
@@ -702,6 +715,9 @@ void xylon_cvc_disable(struct xylon_cvc *cvc)
 	if (layer_data)
 		for (i = 0; i < cvc->layers; i++)
 			xylon_cvc_layer_disable(cvc, i);
+
+	xylon_cvc_set_reg(LOGICVC_POWER_CTRL_OFF, cvc->base, LOGICVC_POWER_CTRL_ROFF, NULL);
+
 }
 
 static int xylon_parse_hw_info(struct device_node *dn, struct xylon_cvc *cvc)

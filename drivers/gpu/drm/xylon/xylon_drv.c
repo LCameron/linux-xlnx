@@ -28,7 +28,12 @@
 #include "xylon_connector.h"
 #include "xylon_crtc.h"
 #include "xylon_drv.h"
-#include "xylon_encoder.h"
+#ifdef CONFIG_DRM_XYLON_DUMMYENC
+	#include "dummy_encoder.h"
+#endif
+#ifdef CONFIG_DRM_XYLON_ADV7511
+	#include "xylon_encoder.h"
+#endif
 #include "xylon_fb.h"
 #include "xylon_fbdev.h"
 #include "xylon_irq.h"
@@ -70,9 +75,17 @@ static int xylon_drm_load(struct drm_device *dev, unsigned long flags)
 
 	xylon_drm_mode_config_init(dev);
 
-	xdev->encoder = xylon_drm_encoder_create(dev);
+#ifdef CONFIG_DRM_XYLON_DUMMYENC
+	xdev->encoder = dummy_encoder_init(dev);
+#else
+	#ifdef CONFIG_DRM_XYLON_ADV7511
+		xdev->encoder = xylon_drm_encoder_create(dev);
+	#else
+		#error Xylon DRM: no encoder selected
+	#endif
+#endif
 	if (IS_ERR(xdev->encoder)) {
-		DRM_ERROR("failed create xylon encoder\n");
+		DRM_ERROR("failed create encoder\n");
 		ret = PTR_ERR(xdev->encoder);
 		goto err_out;
 	}
@@ -103,6 +116,8 @@ static int xylon_drm_load(struct drm_device *dev, unsigned long flags)
 		DRM_ERROR("failed get bpp\n");
 		goto err_fbdev;
 	}
+
+	DRM_INFO("Creating fbdev.  \n");
 	xdev->fbdev = xylon_drm_fbdev_init(dev, bpp, 1, 1);
 	if (IS_ERR(xdev->fbdev)) {
 		DRM_ERROR("failed initialize fbdev\n");

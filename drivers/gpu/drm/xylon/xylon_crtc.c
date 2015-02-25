@@ -586,7 +586,7 @@ struct drm_crtc *xylon_drm_crtc_create(struct drm_device *dev)
 	ret = of_property_read_u32(dev->dev->of_node, "primary-plane",
 				   &crtc->primary_id);
 	if (ret)
-		DRM_INFO("no private-plane property\n");
+		DRM_INFO("no primary-plane property\n");
 
 	ret = xylon_drm_plane_create_all(crtc->manager, 1, crtc->primary_id);
 	if (ret) {
