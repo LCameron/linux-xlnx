@@ -9,6 +9,9 @@
  *  2 of the License, or (at your option) any later version.
  *
  */
+
+//#define DEBUG 1
+
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
@@ -277,7 +280,8 @@ static struct of_device_id of_platform_serial_table[] = {
 	{ .compatible = "ibm,qpace-nwp-serial",
 		.data = (void *)PORT_NWPSERIAL, },
 #endif
-	{ .type = "serial",         .data = (void *)PORT_UNKNOWN, },
+	/* What was the intention of this?  It actually interferes with other serial drivers esp. xilinx_uartps.
+	 { .type = "serial",         .data = (void *)PORT_UNKNOWN, },  */
 	{ /* end of list */ },
 };
 
