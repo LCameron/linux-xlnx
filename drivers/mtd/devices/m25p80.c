@@ -110,6 +110,7 @@ static inline unsigned int m25p80_rx_nbits(struct spi_nor *nor)
 	switch (nor->flash_read) {
 	case SPI_NOR_DUAL:
 		return 2;
+	case SPI_NOR_QUAD_IO:
 	case SPI_NOR_QUAD:
 		return 4;
 	default:
@@ -307,6 +308,7 @@ static const struct spi_device_id m25p_ids[] = {
 	{"w25x64"},	{"w25q64"},	{"w25q128"},	{"w25q80"},
 	{"w25q80bl"},	{"w25q128"},	{"w25q256"},	{"cat25c11"},
 	{"cat25c03"},	{"cat25c09"},	{"cat25c17"},	{"cat25128"},
+	{"is25lp032"},	{"is25lp064"},	{"is25lp128"},
 	{ },
 };
 MODULE_DEVICE_TABLE(spi, m25p_ids);
