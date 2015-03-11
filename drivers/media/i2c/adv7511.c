@@ -33,15 +33,16 @@
 #include <media/v4l2-dv-timings.h>
 #include <media/adv7511.h>
 
-static int debug;
-module_param(debug, int, 0644);
-MODULE_PARM_DESC(debug, "debug level (0-2)");
+//#define DEBUG 1
+#define CONFIG_VIDEO_ADV_DEBUG 1
+static int debug = DEBUG;
+
+//module_param(debug, int, 0644);
+//MODULE_PARM_DESC(debug, "debug level (0-2)");
 
 MODULE_DESCRIPTION("Analog Devices ADV7511 HDMI Transmitter Device Driver");
 MODULE_AUTHOR("Hans Verkuil");
 MODULE_LICENSE("GPL");
-
-#define DEBUG 1
 
 #define MASK_ADV7511_EDID_RDY_INT   0x04
 #define MASK_ADV7511_MSEN_INT       0x40
@@ -59,7 +60,6 @@ MODULE_LICENSE("GPL");
 #define ADV7511_MAX_HEIGHT 1200
 #define ADV7511_MIN_PIXELCLOCK 20000000
 #define ADV7511_MAX_PIXELCLOCK 225000000
-#define XYLON_LOGICVC_INTG
 
 /*
 **********************************************************************
@@ -220,8 +220,13 @@ static s32 adv_smbus_read_byte_data(struct i2c_client *client, u8 command)
 static int adv7511_rd(struct v4l2_subdev *sd, u8 reg)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	int ret;
 
-	return adv_smbus_read_byte_data(client, reg);
+	ret= adv_smbus_read_byte_data(client, reg);
+#ifdef DEBUG
+	printk(KERN_DEBUG "adv7511 read: %08X\n",ret);
+#endif
+	return ret;
 }
 
 static int adv7511_wr(struct v4l2_subdev *sd, u8 reg, u8 val)
@@ -229,6 +234,10 @@ static int adv7511_wr(struct v4l2_subdev *sd, u8 reg, u8 val)
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	int ret;
 	int i;
+
+#ifdef DEBUG
+	printk(KERN_DEBUG "adv7511 write: %08X\n",val);
+#endif
 
 	for (i = 0; i < 3; i++) {
 		ret = i2c_smbus_write_byte_data(client, reg, val);
@@ -364,7 +373,7 @@ static void adv7511_set_IT_content_AVI_InfoFrame(struct v4l2_subdev *sd)
 
 static int adv7511_set_rgb_quantization_mode(struct v4l2_subdev *sd, struct v4l2_ctrl *ctrl)
 {
-#ifdef XYLON_LOGICVC_INTG
+#ifdef CONFIG_FB_XYLON_MISC_ADV7511
 	return 0;
 #endif
 	switch (ctrl->val) {
@@ -1650,14 +1659,14 @@ static int adv7511_probe(struct i2c_client *client, const struct i2c_device_id *
 
 	INIT_DELAYED_WORK(&state->edid_handler, adv7511_edid_handler);
 
-#ifndef XYLON_LOGICVC_INTG
+#ifndef CONFIG_FB_XYLON_MISC_ADV7511
 	adv7511_init_setup(sd);
 #endif
 	adv7511_set_isr(sd, true);
-#ifndef XYLON_LOGICVC_INTG
+#ifndef CONFIG_FB_XYLON_MISC_ADV7511
 	adv7511_check_monitor_present_status(sd);
 #endif
-	v4l2_info(sd, "%s found @ 0x%x (%s)\n", client->name,
+	v4l2_info(sd, "%s found (mainline driver) @ 0x%x (%s)\n", client->name,
 			  client->addr << 1, client->adapter->name);
 	return 0;
 
