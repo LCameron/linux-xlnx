@@ -35,7 +35,7 @@
 
 //#define DEBUG 1
 #define CONFIG_VIDEO_ADV_DEBUG 1
-static int debug = DEBUG;
+static int debug = 0; //DEBUG;
 
 //module_param(debug, int, 0644);
 //MODULE_PARM_DESC(debug, "debug level (0-2)");
