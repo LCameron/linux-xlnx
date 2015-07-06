@@ -15,7 +15,6 @@
 #include <linux/types.h>
 #include <linux/videodev2.h>
 
-	V4L2_MBUS_FMT_Y16_1X16 = 0x2024,
 /**
  * struct v4l2_mbus_framefmt - frame format on the media bus
  * @width:	frame width
@@ -105,6 +104,7 @@ enum v4l2_mbus_pixelcode {
 	V4L2_MBUS_FROM_MEDIA_BUS_FMT(YUYV12_1X24),
 	V4L2_MBUS_FROM_MEDIA_BUS_FMT(YVYU12_1X24),
 	V4L2_MBUS_FROM_MEDIA_BUS_FMT(VUY8_1X24),
+	V4L2_MBUS_FROM_MEDIA_BUS_FMT(Y16_1X16),
 
 	V4L2_MBUS_FROM_MEDIA_BUS_FMT(SBGGR8_1X8),
 	V4L2_MBUS_FROM_MEDIA_BUS_FMT(SGBRG8_1X8),
