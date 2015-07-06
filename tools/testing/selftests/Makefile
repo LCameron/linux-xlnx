@@ -1,23 +1,34 @@
 TARGETS = breakpoints
 TARGETS += cpu-hotplug
 TARGETS += efivarfs
+TARGETS += exec
+TARGETS += firmware
+TARGETS += ftrace
 TARGETS += kcmp
 TARGETS += memfd
 TARGETS += memory-hotplug
-TARGETS += mqueue
 TARGETS += mount
+TARGETS += mqueue
 TARGETS += net
-TARGETS += ptrace
-TARGETS += timers
-TARGETS += vm
 TARGETS += powerpc
-TARGETS += user
+TARGETS += ptrace
+TARGETS += size
 TARGETS += sysctl
-TARGETS += firmware
-TARGETS += ftrace
+TARGETS += timers
+TARGETS += user
+TARGETS += vm
+#Please keep the TARGETS list alphabetically sorted
 
 TARGETS_HOTPLUG = cpu-hotplug
 TARGETS_HOTPLUG += memory-hotplug
+
+# Clear LDFLAGS and MAKEFLAGS if called from main
+# Makefile to avoid test build failures when test
+# Makefile doesn't have explicit build rules.
+ifeq (1,$(MAKELEVEL))
+undefine LDFLAGS
+override MAKEFLAGS =
+endif
 
 all:
 	for TARGET in $(TARGETS); do \

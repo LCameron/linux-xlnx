@@ -1361,7 +1361,6 @@ MODULE_DEVICE_TABLE(of, xtg_of_match);
 static struct platform_driver xtg_driver = {
 	.driver = {
 		.name = "xilinx-trafgen",
-		.owner = THIS_MODULE,
 		.of_match_table = xtg_of_match,
 	},
 	.probe = xtg_probe,
@@ -1372,4 +1371,4 @@ module_platform_driver(xtg_driver);
 
 MODULE_AUTHOR("Xilinx Inc.");
 MODULE_DESCRIPTION("Xilinx Traffic Generator driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

@@ -193,6 +193,7 @@ void bnx2x_vfop_qctor_prep(struct bnx2x *bp,
 	/* Setup-op general parameters */
 	setup_p->gen_params.spcl_id = vf->sp_cl_id;
 	setup_p->gen_params.stat_id = vfq_stat_id(vf, q);
+	setup_p->gen_params.fp_hsi = vf->fp_hsi;
 
 	/* Setup-op pause params:
 	 * Nothing to do, the pause thresholds are set by default to 0 which
@@ -2237,7 +2238,9 @@ int bnx2x_vf_close(struct bnx2x *bp, struct bnx2x_virtf *vf)
 
 		cookie.vf = vf;
 		cookie.state = VF_ACQUIRED;
-		bnx2x_stats_safe_exec(bp, bnx2x_set_vf_state, &cookie);
+		rc = bnx2x_stats_safe_exec(bp, bnx2x_set_vf_state, &cookie);
+		if (rc)
+			goto op_err;
 	}
 
 	DP(BNX2X_MSG_IOV, "set state to acquired\n");

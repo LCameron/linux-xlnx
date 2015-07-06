@@ -1704,10 +1704,9 @@ static int xgene_phy_probe(struct platform_device *pdev)
 	for (i = 0; i < MAX_LANE; i++)
 		ctx->sata_param.speed[i] = 2; /* Default to Gen3 */
 
-	ctx->dev = &pdev->dev;
 	platform_set_drvdata(pdev, ctx);
 
-	ctx->phy = devm_phy_create(ctx->dev, NULL, &xgene_phy_ops, NULL);
+	ctx->phy = devm_phy_create(ctx->dev, NULL, &xgene_phy_ops);
 	if (IS_ERR(ctx->phy)) {
 		dev_dbg(&pdev->dev, "Failed to create PHY\n");
 		rc = PTR_ERR(ctx->phy);

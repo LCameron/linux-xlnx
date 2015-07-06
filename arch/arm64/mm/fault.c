@@ -198,7 +198,7 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 	int fault, sig, code;
 	unsigned long vm_flags = VM_READ | VM_WRITE | VM_EXEC;
 	unsigned int mm_flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
-	unsigned long esr_ec = esr >> ESR_EL1_EC_SHIFT;
+	unsigned long esr_ec = esr >> ESR_ELx_EC_SHIFT;
 
 	tsk = current;
 	mm  = tsk->mm;
@@ -217,9 +217,9 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 	if (user_mode(regs))
 		mm_flags |= FAULT_FLAG_USER;
 
-	if (esr_ec == ESR_EL1_EC_IABT_EL0 || esr_ec == ESR_EL1_EC_IABT_EL1) {
+	if (esr_ec == ESR_ELx_EC_IABT_LOW || esr_ec == ESR_ELx_EC_IABT_CUR) {
 		vm_flags = VM_EXEC;
-	} else if ((esr & ESR_EL1_WRITE) && !(esr & ESR_EL1_CM)) {
+	} else if ((esr & ESR_ELx_WNR) && !(esr & ESR_ELx_CM)) {
 		vm_flags = VM_WRITE;
 		mm_flags |= FAULT_FLAG_WRITE;
 	}
@@ -380,7 +380,7 @@ static struct fault_info {
 	{ do_bad,		SIGBUS,  0,		"level 1 address size fault"	},
 	{ do_bad,		SIGBUS,  0,		"level 2 address size fault"	},
 	{ do_bad,		SIGBUS,  0,		"level 3 address size fault"	},
-	{ do_translation_fault,	SIGSEGV, SEGV_MAPERR,	"input address range fault"	},
+	{ do_translation_fault,	SIGSEGV, SEGV_MAPERR,	"level 0 translation fault"	},
 	{ do_translation_fault,	SIGSEGV, SEGV_MAPERR,	"level 1 translation fault"	},
 	{ do_translation_fault,	SIGSEGV, SEGV_MAPERR,	"level 2 translation fault"	},
 	{ do_page_fault,	SIGSEGV, SEGV_MAPERR,	"level 3 translation fault"	},

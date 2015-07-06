@@ -10,10 +10,6 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #ifndef __LINUX_SPI_H
@@ -260,6 +256,7 @@ static inline void spi_unregister_driver(struct spi_driver *sdrv)
  * @pump_messages: work struct for scheduling work to the message pump
  * @queue_lock: spinlock to syncronise access to message queue
  * @queue: message queue
+ * @idling: the device is entering idle state
  * @cur_msg: the currently in-flight message
  * @cur_msg_prepared: spi_prepare_message was called for the currently
  *                    in-flight message
@@ -362,6 +359,8 @@ struct spi_master {
 #define SPI_MASTER_MUST_TX      BIT(4)		/* requires tx */
 #define SPI_MASTER_U_PAGE	BIT(5)		/* select upper flash */
 #define SPI_MASTER_QUAD_MODE	BIT(6)		/* support quad mode */
+#define SPI_DATA_STRIPE		BIT(7)		/* support data stripe */
+#define SPI_BOTH_FLASH		BIT(8)		/* enable both flashes */
 
 	/* lock and mutex for SPI bus locking */
 	spinlock_t		bus_lock_spinlock;
@@ -427,6 +426,7 @@ struct spi_master {
 	spinlock_t			queue_lock;
 	struct list_head		queue;
 	struct spi_message		*cur_msg;
+	bool				idling;
 	bool				busy;
 	bool				running;
 	bool				rt;
@@ -653,7 +653,7 @@ struct spi_transfer {
  * sequence completes.  On some systems, many such sequences can execute as
  * as single programmed DMA transfer.  On all systems, these messages are
  * queued, and might complete after transactions to other devices.  Messages
- * sent to a given spi_device are alway executed in FIFO order.
+ * sent to a given spi_device are always executed in FIFO order.
  *
  * The code that submits an spi_message (and its spi_transfers)
  * to the lower layers is responsible for managing its memory.
@@ -1050,5 +1050,11 @@ spi_unregister_device(struct spi_device *spi)
 
 extern const struct spi_device_id *
 spi_get_device_id(const struct spi_device *sdev);
+
+static inline bool
+spi_transfer_is_last(struct spi_master *master, struct spi_transfer *xfer)
+{
+	return list_is_last(&xfer->transfer_list, &master->cur_msg->transfers);
+}
 
 #endif /* __LINUX_SPI_H */
