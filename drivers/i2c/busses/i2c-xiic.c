@@ -611,7 +611,6 @@ static void xiic_start_send(struct xiic_i2c *i2c)
 static irqreturn_t xiic_isr(int irq, void *dev_id)
 {
 	struct xiic_i2c *i2c = dev_id;
-	spin_lock(&i2c->lock);
 	u32 pend, isr, ier;
 	irqreturn_t ret = IRQ_HANDLED;
 	/* Do not processes a devices interrupts if the device has no
@@ -628,8 +627,6 @@ static irqreturn_t xiic_isr(int irq, void *dev_id)
 	} else{
 		ret = IRQ_NONE;
 	}
-
-	spin_unlock(&i2c->lock);
 
 	return ret;
 }
