@@ -380,6 +380,11 @@ static irqreturn_t xiic_process(int irq, void *dev_id)
 		__func__, xiic_getreg8(i2c, XIIC_SR_REG_OFFSET),
 		i2c->tx_msg, i2c->nmsgs);
 
+	/* Do not processes a devices interrupts if the device has no
+	 * interrupts pending  (shared interrupt)
+	 */
+	if (!pend)
+		return IRQ_NONE;
 
 	/* Service requesting interrupt */
 	if ((pend & XIIC_INTR_ARB_LOST_MASK) ||
@@ -494,6 +499,11 @@ static irqreturn_t xiic_process(int irq, void *dev_id)
 			 * make sure to disable tx half
 			 */
 			xiic_irq_dis(i2c, XIIC_INTR_TX_HALF_MASK);
+	} else {
+		/* got IRQ which is not acked */
+		dev_err(i2c->adap.dev.parent, "%s Got unexpected IRQ\n",
+			__func__);
+		clr = pend;
 	}
 out:
 	dev_dbg(i2c->adap.dev.parent, "%s clr: 0x%x\n", __func__, clr);
@@ -612,8 +622,11 @@ static irqreturn_t xiic_isr(int irq, void *dev_id)
 	isr = xiic_getreg32(i2c, XIIC_IISR_OFFSET);
 	ier = xiic_getreg32(i2c, XIIC_IIER_OFFSET);
 	pend = isr & ier;
-	if (pend)
+	if (pend){
 		ret = IRQ_WAKE_THREAD;
+	} else{
+		ret = IRQ_NONE;
+	}
 
 	return ret;
 }
