@@ -21,6 +21,9 @@
  * kernel.
  */
 
+//#define DEBUG 1
+
+
 /* Supports:
  * Xilinx IIC
  */
@@ -76,6 +79,7 @@ struct xiic_i2c {
 	struct i2c_msg		*rx_msg;
 	int			rx_pos;
 	enum xiic_endian	endianness;
+	u32 	pending_irqs;
 };
 
 
@@ -369,10 +373,14 @@ static irqreturn_t xiic_process(int irq, void *dev_id)
 	 * To find which interrupts are pending; AND interrupts pending with
 	 * interrupts masked.
 	 */
-	spin_lock(&i2c->lock);
+	spin_lock_irqsave(&i2c->lock, flags);
 	isr = xiic_getreg32(i2c, XIIC_IISR_OFFSET);
 	ier = xiic_getreg32(i2c, XIIC_IIER_OFFSET);
 	pend = isr & ier;
+	if( pend != i2c->pending_irqs){
+		dev_dbg(i2c->adap.dev.parent, "%s: Thread IRQs do not match ISR:  0x%x 0x%x\n",
+			__func__, pend, i2c->pending_irqs);
+	}
 
 	dev_dbg(i2c->adap.dev.parent, "%s: IER: 0x%x, ISR: 0x%x, pend: 0x%x\n",
 		__func__, ier, isr, pend);
@@ -396,6 +404,7 @@ static irqreturn_t xiic_process(int irq, void *dev_id)
 		 * this is probably a TX error
 		 */
 
+		clr |= (pend & XIIC_INTR_ARB_LOST_MASK) | (pend & XIIC_INTR_TX_ERROR_MASK);
 		dev_dbg(i2c->adap.dev.parent, "%s error\n", __func__);
 
 		/* dynamic mode seem to suffer from problems if we just flushes
@@ -499,17 +508,20 @@ static irqreturn_t xiic_process(int irq, void *dev_id)
 			 * make sure to disable tx half
 			 */
 			xiic_irq_dis(i2c, XIIC_INTR_TX_HALF_MASK);
-	} else {
-		/* got IRQ which is not acked */
-		dev_err(i2c->adap.dev.parent, "%s Got unexpected IRQ\n",
-			__func__);
-		clr = pend;
-	}
+	} 
 out:
 	dev_dbg(i2c->adap.dev.parent, "%s clr: 0x%x\n", __func__, clr);
 
+	if(clr!=pend){
+               /* got IRQ which is not acked */
+               dev_err(i2c->adap.dev.parent, "%s Got unexpected IRQ\n",
+                       __func__);
+               dev_dbg(i2c->adap.dev.parent, "ISR %08x acked IRQs %08x\n", pend, clr);
+               clr = pend;
+	}
+
 	xiic_setreg32(i2c, XIIC_IISR_OFFSET, clr);
-	spin_unlock(&i2c->lock);
+	spin_unlock_irqrestore(&i2c->lock, flags);
 	return IRQ_HANDLED;
 }
 
@@ -618,10 +630,9 @@ static irqreturn_t xiic_isr(int irq, void *dev_id)
 	 */
 
 	dev_dbg(i2c->adap.dev.parent, "%s entry\n", __func__);
-
 	isr = xiic_getreg32(i2c, XIIC_IISR_OFFSET);
 	ier = xiic_getreg32(i2c, XIIC_IIER_OFFSET);
-	pend = isr & ier;
+	i2c->pending_irqs = pend = isr & ier;
 	if (pend){
 		ret = IRQ_WAKE_THREAD;
 	} else{
@@ -679,8 +690,16 @@ static void xiic_start_xfer(struct xiic_i2c *i2c)
 {
 	unsigned long flags;
 
+	//Why was this locking removed but the definition for flags left here?
+	// There are two possible entry contexts for i2c register operations: IRQ via the isr and ioctl via this function.
+	// IRQ uses spinlocks, ioctls above this level (i2c algo level) mutex the bus.
+	// But that meant each context happily held its own type of lock but conflicted with the other causing bad things to happen.
+	// And also why would spinlock_irqsave be used?
+	spin_lock_irqsave(&i2c->lock,flags);
 
 	__xiic_start_xfer(i2c);
+	spin_unlock_irqrestore(&i2c->lock,flags);
+
 }
 
 static int xiic_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)

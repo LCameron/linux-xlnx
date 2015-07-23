@@ -28,7 +28,7 @@
 #define ULITE_NAME		"ttyUL"
 #define ULITE_MAJOR		204
 #define ULITE_MINOR		187
-#define ULITE_NR_UARTS		6
+#define ULITE_NR_UARTS		8
 
 /* ---------------------------------------------------------------------
  * Register definitions
@@ -194,6 +194,9 @@ static irqreturn_t ulite_isr(int irq, void *dev_id)
 {
 	struct uart_port *port = dev_id;
 	int busy, n = 0;
+	unsigned long flags;
+
+	spin_lock_irqsave(&port->lock, flags);
 
 	do {
 		int stat = uart_in32(ULITE_STATUS, port);
@@ -201,6 +204,7 @@ static irqreturn_t ulite_isr(int irq, void *dev_id)
 		busy |= ulite_transmit(port, stat);
 		n++;
 	} while (busy);
+	spin_unlock_irqrestore(&port->lock, flags);
 
 	/* work done? */
 	if (n > 1) {
@@ -558,7 +562,7 @@ static int ulite_assign(struct device *dev, int id, u32 base, int irq)
 				break;
 	}
 	if (id < 0 || id >= ULITE_NR_UARTS) {
-		dev_err(dev, "%s%i too large\n", ULITE_NAME, id);
+		dev_err(dev, "%s%i too large, kernel compiled for up to %d\n", ULITE_NAME, id, ULITE_NR_UARTS);
 		return -EINVAL;
 	}
 
@@ -710,3 +714,4 @@ module_exit(ulite_exit);
 MODULE_AUTHOR("Peter Korsgaard <jacmet@sunsite.dk>");
 MODULE_DESCRIPTION("Xilinx uartlite serial driver");
 MODULE_LICENSE("GPL");
+
