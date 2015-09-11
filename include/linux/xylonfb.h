@@ -66,6 +66,7 @@ struct xylonfb_hw_access {
 #define XYLONFB_LAYER_GEOMETRY \
 	XYLONFB_IOR(35, struct xylonfb_layer_geometry)
 #define XYLONFB_LAYER_BUFFER_OFFSET	XYLONFB_IOR(36, unsigned int)
+#define XYLONFB_LAYER_BUFFER_SWITCH	XYLONFB_IOR(42, unsigned int)
 #define XYLONFB_BACKGROUND_COLOR \
 	XYLONFB_IOR(37, struct xylonfb_layer_color)
 #define XYLONFB_LAYER_EXT_BUFF_SWITCH	XYLONFB_IOW(38, unsigned char)

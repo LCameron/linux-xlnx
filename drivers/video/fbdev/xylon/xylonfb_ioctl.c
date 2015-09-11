@@ -528,7 +528,30 @@ int xylonfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 		var32 = ld->fd->buffer_offset;
 		put_user(var32, (unsigned long __user *)arg);
 		break;
+	case XYLONFB_LAYER_BUFFER_SWITCH: {
+		u32 buffer_number=4;
+		uint triple_buffer_offset;
+		struct fb_var_screeninfo *var = &fbi->var;
+		struct xylonfb_layer_fix_data *fix = ld->fd;
 
+		if (copy_from_user(&buffer_number, argp,
+				   sizeof(buffer_number)))
+			return -EFAULT;
+		if(buffer_number < 0 || buffer_number > LOGICVC_MAX_LAYER_BUFFERS)
+			return -EINVAL;
+		ld->triple_buffer_active_number = (u8)buffer_number;
+
+		triple_buffer_offset = get_triple_buffer_offset(ld);
+
+		ld->fb_pbase_active = ld->fb_pbase +
+					  ((var->xoffset * ( fix->bpp / 8)) +
+					  (var->yoffset * fix->width * (fix->bpp / 8))) +
+					  (ld->triple_buffer_active_number * triple_buffer_offset);
+		data->reg_access.set_reg_val(ld->fb_pbase_active, ld->base,
+						 LOGICVC_LAYER_ADDR_ROFF, ld);
+
+		break;
+	}
 	case XYLONFB_BACKGROUND_COLOR:
 		XYLONFB_DBG(INFO, "XYLONFB_BACKGROUND_COLOR");
 		if (data->bg_layer_bpp == 0)

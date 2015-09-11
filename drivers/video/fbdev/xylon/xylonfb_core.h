@@ -160,6 +160,8 @@ struct xylonfb_layer_data {
 
 	dma_addr_t fb_pbase_active;
 
+	u8 triple_buffer_active_number;
+
 	u32 flags;
 };
 
@@ -250,5 +252,7 @@ extern int xylonfb_init_core(struct xylonfb_data *data);
 extern int xylonfb_deinit_core(struct platform_device *pdev);
 extern int xylonfb_ioctl(struct fb_info *fbi, unsigned int cmd,
 			 unsigned long arg);
+
+uint get_triple_buffer_offset(struct xylonfb_layer_data* ldata);
 
 #endif /* __XYLONFB_CORE_H__ */

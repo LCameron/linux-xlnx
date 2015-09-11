@@ -654,12 +654,27 @@ static int xylonfb_blank(int blank_mode, struct fb_info *fbi)
 	return 0;
 }
 
+uint get_triple_buffer_offset(struct xylonfb_layer_data* ldata) {
+	uint offset;
+	if (ldata->fd->buffer_offset) {
+		offset = ldata->fd->buffer_offset;
+	} else if (ldata->fd->address_range) {
+		offset = ldata->fd->address_range
+				/ (ldata->fd->width * (ldata->fd->bpp / 8));
+	} else {
+		offset = XYLONFB_VRES_DEFAULT;
+	}
+
+	return offset;
+}
+
 static int xylonfb_pan_display(struct fb_var_screeninfo *var,
 			       struct fb_info *fbi)
 {
 	struct xylonfb_layer_data *ld = fbi->par;
 	struct xylonfb_data *data = ld->data;
 	struct xylonfb_layer_fix_data *fd = ld->fd;
+	uint triple_buffer_offset;
 
 	XYLONFB_DBG(INFO, "%s", __func__);
 
@@ -684,9 +699,12 @@ static int xylonfb_pan_display(struct fb_var_screeninfo *var,
 	fbi->var.xoffset = var->xoffset;
 	fbi->var.yoffset = var->yoffset;
 
+	triple_buffer_offset = get_triple_buffer_offset(ld);
+
 	ld->fb_pbase_active = ld->fb_pbase +
 			      ((var->xoffset * (fd->bpp / 8)) +
-			      (var->yoffset * fd->width * (fd->bpp / 8)));
+			      (var->yoffset * fd->width * (fd->bpp / 8))) +
+			      (ld->triple_buffer_active_number * triple_buffer_offset);
 
 	data->reg_access.set_reg_val((fbi->var.xres - 1), ld->base,
 				     LOGICVC_LAYER_HPOS_ROFF, ld);
@@ -1228,6 +1246,7 @@ static int xylonfb_vmem_init(struct xylonfb_layer_data *ld, int id, bool *mmap)
 	}
 
 	ld->fb_pbase_active = ld->fb_pbase;
+	ld->triple_buffer_active_number = 0;
 
 	XYLONFB_DBG(CORE, "frame buffer at: %08x\n", ld->fb_base);
 
