@@ -546,7 +546,7 @@ int xylonfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 		ld->fb_pbase_active = ld->fb_pbase +
 					  ((var->xoffset * ( fix->bpp / 8)) +
 					  (var->yoffset * fix->width * (fix->bpp / 8))) +
-					  (ld->triple_buffer_active_number * triple_buffer_offset);
+					  ((ld->triple_buffer_active_number * triple_buffer_offset) * (fix->bpp / 8));
 		data->reg_access.set_reg_val(ld->fb_pbase_active, ld->base,
 						 LOGICVC_LAYER_ADDR_ROFF, ld);
 
