@@ -14,7 +14,7 @@
  * GNU General Public License for more details.
  */
 
-/* #define DEBUG 1  */
+#define DEBUG 1  
 
 #include <linux/console.h>
 #include <linux/delay.h>
@@ -26,9 +26,6 @@
 #include <linux/videodev2.h>
 
 #include "xylonfb_core.h"
-#if defined(CONFIG_FB_XYLON_MISC)
-#include "xylonfb_misc.h"
-#endif
 #include "logicvc.h"
 
 #define LOGICVC_PIX_FMT_AYUV	v4l2_fourcc('A', 'Y', 'U', 'V')
@@ -69,7 +66,7 @@ static void xylonfb_disable_logicvc_output(struct fb_info *fbi);
 static void xylonfb_logicvc_layer_enable(struct fb_info *fbi, bool enable);
 static void xylonfb_fbi_update(struct fb_info *fbi);
 
-static u32 xylonfb_get_reg(void __iomem *base, unsigned long offset,
+static u32 xylonfb_get_reg(void __iomem *base, unsigned int offset,
 			   struct xylonfb_layer_data *ld)
 {
 	u32 ret;
@@ -80,7 +77,7 @@ static u32 xylonfb_get_reg(void __iomem *base, unsigned long offset,
 	return ret;
 }
 
-static void xylonfb_set_reg(u32 value, void __iomem *base, unsigned long offset,
+static void xylonfb_set_reg(u32 value, void __iomem *base, unsigned int offset,
 			    struct xylonfb_layer_data *ld)
 {
 #ifdef DEBUG
@@ -90,19 +87,19 @@ static void xylonfb_set_reg(u32 value, void __iomem *base, unsigned long offset,
 }
 
 static unsigned long xylonfb_get_reg_mem_addr(void __iomem *base,
-					      unsigned long offset,
+					      unsigned int offset,
 					      struct xylonfb_layer_data *ld)
 {
 
-	unsigned long ordinal = offset >> 3;
+	unsigned int ordinal = offset / LOGICVC_REG_STRIDE;
 	u32 ret;
 
 	if ((unsigned long)base - (unsigned long)ld->data->dev_base) {
-		ret = (unsigned long)(&ld->reg_list->hpos) +
-				       (ordinal * sizeof(unsigned long));
+		ret = (unsigned long)(&ld->regs) + (ordinal * sizeof(u32));
 	} else {
-		ret = (unsigned long)(&ld->data->reg_list->dtype) +
-				       (ordinal * sizeof(unsigned long));
+		ordinal -= (LOGICVC_CTRL_ROFF / LOGICVC_REG_STRIDE);
+		ret = (unsigned long)(&ld->data->regs) +
+				       (ordinal * sizeof(u32));
 	}
 
 #ifdef DEBUG
@@ -112,14 +109,14 @@ static unsigned long xylonfb_get_reg_mem_addr(void __iomem *base,
 
 }
 
-static u32 xylonfb_get_reg_mem(void __iomem *base, unsigned long offset,
+static u32 xylonfb_get_reg_mem(void __iomem *base, unsigned int offset,
 			       struct xylonfb_layer_data *ld)
 {
 	return *((unsigned long *)xylonfb_get_reg_mem_addr(base, offset, ld));
 }
 
 static void xylonfb_set_reg_mem(u32 value, void __iomem *base,
-				unsigned long offset,
+				unsigned int offset,
 				struct xylonfb_layer_data *ld)
 {
 	unsigned long *reg_mem_addr =
@@ -142,7 +139,7 @@ static irqreturn_t xylonfb_isr(int irq, void *dev_id)
 	void __iomem *dev_base = data->dev_base;
 	u32 isr;
 
-	XYLONFB_DBG(CORE, "%s", __func__);
+//	XYLONFB_DBG(CORE, "%s", __func__);
 
 	isr = readl(dev_base + LOGICVC_INT_STAT_ROFF);
 	if (isr & LOGICVC_INT_V_SYNC) {
@@ -163,21 +160,28 @@ static int xylonfb_open(struct fb_info *fbi, int user)
 {
 	struct xylonfb_layer_data *ld = fbi->par;
 	struct xylonfb_data *data = ld->data;
+	int ret;
 	bool enable = false;
 
 	XYLONFB_DBG(INFO, "%s", __func__);
 
 	if (atomic_read(&ld->refcount) == 0) {
 		if (ld->flags & XYLONFB_FLAGS_ACTIVATE_NEXT_OPEN) {
-			enable = true;
 			ld->flags &= ~XYLONFB_FLAGS_ACTIVATE_NEXT_OPEN;
-		} else if (fbi->var.activate == FB_ACTIVATE_NOW) {
 			enable = true;
-		} else if (fbi->var.activate == FB_ACTIVATE_NXTOPEN) {
-			ld->flags |= XYLONFB_FLAGS_ACTIVATE_NEXT_OPEN;
-		} else if (fbi->var.activate == FB_ACTIVATE_VBL) {
-			if (xylonfb_vsync_wait(0, fbi) > 0)
+		} else {
+			if (fbi->var.activate == FB_ACTIVATE_NOW) {
 				enable = true;
+			} else if (fbi->var.activate == FB_ACTIVATE_NXTOPEN) {
+				ld->flags |= XYLONFB_FLAGS_ACTIVATE_NEXT_OPEN;
+				return 0;
+			} else if (fbi->var.activate == FB_ACTIVATE_VBL) {
+				ret = xylonfb_vsync_wait(0, fbi);
+				if (ret > 0)
+					enable = true;
+				else
+					return ret;
+			}
 		}
 
 		if (enable) {
@@ -198,11 +202,13 @@ static int xylonfb_release(struct fb_info *fbi, int user)
 
 	XYLONFB_DBG(INFO, "%s", __func__);
 
-	atomic_dec(&ld->refcount);
+	if (atomic_read(&ld->refcount) > 0) {
+		atomic_dec(&ld->refcount);
 
-	if (atomic_read(&ld->refcount) == 0) {
-		xylonfb_logicvc_layer_enable(fbi, false);
-		atomic_dec(&data->refcount);
+		if (atomic_read(&ld->refcount) == 0) {
+			xylonfb_logicvc_layer_enable(fbi, false);
+			atomic_dec(&data->refcount);
+		}
 	}
 
 	return 0;
@@ -274,6 +280,7 @@ static int xylonfb_check_var(struct fb_var_screeninfo *var,
 
 static int xylonfb_set_par(struct fb_info *fbi)
 {
+	struct device *dev = fbi->dev;
 	struct fb_info **afbi = NULL;
 	struct xylonfb_layer_data *ld = fbi->par;
 	struct xylonfb_data *data = ld->data;
@@ -290,14 +297,12 @@ static int xylonfb_set_par(struct fb_info *fbi)
 
 	if (!(data->flags & XYLONFB_FLAGS_EDID_VMODE) &&
 	    ((fbi->var.xres == data->vm_active.vmode.xres) ||
-	    (fbi->var.yres == data->vm_active.vmode.yres))) {
+	    (fbi->var.yres == data->vm_active.vmode.yres)))
 		resolution_change = false;
-	} else {
+	else
 		resolution_change = true;
-	}
 
-	if (resolution_change ||
-	    (data->flags & XYLONFB_FLAGS_VMODE_INIT)) {
+	if (resolution_change || (data->flags & XYLONFB_FLAGS_VMODE_INIT)) {
 		if (!(data->flags & XYLONFB_FLAGS_VMODE_INIT)) {
 			struct xylonfb_layer_data *ld;
 
@@ -334,16 +339,18 @@ static int xylonfb_set_par(struct fb_info *fbi)
 		if (!ret) {
 			f = PICOS2KHZ(data->vm_active.vmode.pixclock);
 			if (data->flags & XYLONFB_FLAGS_PIXCLK_VALID)
-				if (xylonfb_hw_pixclk_set(data->pixel_clock, f))
-					pr_err("failed set pixel clock\n");
+				if (xylonfb_hw_pixclk_set(&data->pdev->dev,
+							  data->pixel_clock, f))
+					dev_err(dev,
+						"failed set pixel clock\n");
 
 			xylonfb_fbi_update(fbi);
-			pr_info("video mode: %dx%d%s-%d@%d%s\n",
-				fbi->var.xres, fbi->var.yres,
-				data->vm_active.opts_cvt,
-				fbi->var.bits_per_pixel,
-				data->vm_active.vmode.refresh,
-				data->vm_active.opts_ext);
+			XYLONFB_DBG(INFO, "video mode: %dx%d%s-%d@%d%s\n",
+				    fbi->var.xres, fbi->var.yres,
+				    data->vm_active.opts_cvt,
+				    fbi->var.bits_per_pixel,
+				    data->vm_active.vmode.refresh,
+				    data->vm_active.opts_ext);
 		}
 
 		xylonfb_enable_logicvc_output(fbi);
@@ -378,11 +385,14 @@ static void xylonfb_set_color_hw_rgb2yuv(u16 t, u16 r, u16 g, u16 b, u32 *yuv,
 	XYLONFB_DBG(INFO, "%s", __func__);
 
 	y = ((data->coeff.cyr * (r & 0xFF)) + (data->coeff.cyg * (g & 0xFF)) +
-	     (data->coeff.cyb * (b & 0xFF)) + data->coeff.cy) / 100000;
+	     (data->coeff.cyb * (b & 0xFF)) + data->coeff.cy) /
+	     LOGICVC_YUV_NORM;
 	u = ((-data->coeff.cur * (r & 0xFF)) - (data->coeff.cug * (g & 0xFF)) +
-	     (data->coeff.cub * (b & 0xFF)) + 12800000) / 100000;
+	     (data->coeff.cub * (b & 0xFF)) + LOGICVC_COEFF_U) /
+	     LOGICVC_YUV_NORM;
 	v = ((data->coeff.cvr * (r & 0xFF)) - (data->coeff.cvg * (g & 0xFF)) -
-	     (data->coeff.cvb * (b & 0xFF)) + 12800000) / 100000;
+	     (data->coeff.cvb * (b & 0xFF)) + LOGICVC_COEFF_V) /
+	     LOGICVC_YUV_NORM;
 
 	*yuv = ((t & 0xFF) << 24) | (y << 16) | (u << 8) | v;
 }
@@ -495,7 +505,7 @@ static int xylonfb_set_color_hw(u16 *t, u16 *r, u16 *g, u16 *b,
 				if (t)
 					a = t[id];
 				((u32 *)(fbi->pseudo_palette))[id] =
-					(((t[id] & 0xFF) << to) |
+					(((a & 0xFF) << to) |
 					((r[id] & 0xFF) << ro) |
 					((g[id] & 0xFF) << go) |
 					((b[id] & 0xFF) << bo));
@@ -678,18 +688,22 @@ static int xylonfb_pan_display(struct fb_var_screeninfo *var,
 
 	XYLONFB_DBG(INFO, "%s", __func__);
 
-	if (!(data->flags & XYLONFB_FLAGS_SIZE_POSITION))
+	if (!(data->flags & XYLONFB_FLAGS_SIZE_POSITION)){
+		XYLONFB_DBG(CORE, "size-position");
 		return -EINVAL;
+	}
 
 	if ((fbi->var.xoffset == var->xoffset) &&
 	    (fbi->var.yoffset == var->yoffset))
 		return 0;
 
 	if (fbi->var.vmode & FB_VMODE_YWRAP) {
+		XYLONFB_DBG(CORE, "ywrap");
 		return -EINVAL;
 	} else {
 		if (((var->xoffset + fbi->var.xres) > fbi->var.xres_virtual) ||
 		    ((var->yoffset + fbi->var.yres) > fbi->var.yres_virtual))
+		XYLONFB_DBG(CORE, "outside virtual res");
 			return -EINVAL;
 	}
 
@@ -699,19 +713,33 @@ static int xylonfb_pan_display(struct fb_var_screeninfo *var,
 	fbi->var.xoffset = var->xoffset;
 	fbi->var.yoffset = var->yoffset;
 
+	if (!(data->flags & XYLONFB_FLAGS_DYNAMIC_LAYER_ADDRESS)) {
+		//core v4 doesn't support this. core v3 crops of the left and top HOFF VOFF pixels
+		data->reg_access.set_reg_val(var->xoffset + ld->xoff, ld->base,
+					     LOGICVC_LAYER_HOFF_ROFF, ld);
+		data->reg_access.set_reg_val(var->yoffset + ld->yoff, ld->base,
+					     LOGICVC_LAYER_VOFF_ROFF, ld);
+	}
+
 	triple_buffer_offset = get_triple_buffer_offset(ld);
 
-	ld->fb_pbase_active = ld->fb_pbase +
-			      ((var->xoffset * (fd->bpp / 8)) +
-			      (var->yoffset * fd->width * (fd->bpp / 8))) +
-			      (ld->triple_buffer_active_number * triple_buffer_offset);
-
+	//This part shifts the start of drawing (pixel 0,0) down and right to the HPOS and VPOS
 	data->reg_access.set_reg_val((fbi->var.xres - 1), ld->base,
 				     LOGICVC_LAYER_HPOS_ROFF, ld);
+	//core v3 needs VPOS register written last to trigger all changes to geometry
 	data->reg_access.set_reg_val((fbi->var.yres - 1), ld->base,
 				     LOGICVC_LAYER_VPOS_ROFF, ld);
-	data->reg_access.set_reg_val(ld->fb_pbase_active, ld->base,
-				     LOGICVC_LAYER_ADDR_ROFF, ld);
+
+	if (data->flags & XYLONFB_FLAGS_DYNAMIC_LAYER_ADDRESS) {
+		//core v4 implements buffer switching and cropping by modifying layer address.  And this write triggers all the updated geometry.
+		ld->fb_pbase_active = ld->fb_pbase +
+				      (( (var->xoffset + ld->xoff) * (fd->bpp / 8)) +
+				      ( (var->yoffset + ld->yoff) * fd->width * (fd->bpp / 8))) +
+				      (ld->triple_buffer_active_number * triple_buffer_offset);
+
+		data->reg_access.set_reg_val(ld->fb_pbase_active, ld->base,
+					     LOGICVC_LAYER_ADDR_ROFF, ld);
+	}
 
 	return 0;
 }
@@ -729,26 +757,19 @@ static struct fb_ops xylonfb_ops = {
 	.fb_fillrect = cfb_fillrect,
 	.fb_copyarea = cfb_copyarea,
 	.fb_imageblit = cfb_imageblit,
-	.fb_cursor = NULL,
-	.fb_rotate = NULL,
-	.fb_sync = NULL,
 	.fb_ioctl = xylonfb_ioctl,
-	.fb_mmap = NULL,
-	.fb_get_caps = NULL,
-	.fb_destroy = NULL,
 };
 
 static int xylonfb_find_next_layer(struct xylonfb_data *data, int layers,
 				   int id)
 {
-	dma_addr_t address, temp_address, loop_address;
-	int i, next;
+	dma_addr_t address = data->fd[id]->address;
+	dma_addr_t temp_address = ((unsigned long) - 1);
+	dma_addr_t loop_address;
+	int next = -1;
+	int i;
 
 	XYLONFB_DBG(INFO, "%s", __func__);
-
-	address = data->fd[id]->address;
-	temp_address = ((unsigned long) - 1);
-	next = -1;
 
 	for (i = 0; i < layers; i++) {
 		loop_address = data->fd[i]->address;
@@ -1017,8 +1038,10 @@ static int xylonfb_set_timings(struct fb_info *fbi, int bpp)
 	struct xylonfb_data *data = ld->data;
 	struct fb_var_screeninfo fb_var;
 	struct fb_videomode *vm;
-	u32 xres, yres;
 	int rc;
+#if defined(CONFIG_FB_XYLON_MISC)
+	u32 xres, yres;
+#endif
 
 	XYLONFB_DBG(INFO, "%s", __func__);
 
@@ -1041,7 +1064,7 @@ static int xylonfb_set_timings(struct fb_info *fbi, int bpp)
 	    (data->flags & XYLONFB_FLAGS_EDID_READY)) {
 		if (data->flags & XYLONFB_FLAGS_VMODE_INIT) {
 #if defined(CONFIG_FB_XYLON_MISC)
-			fb_var = *(data->misc->var_screeninfo);
+			fb_var = *(data->misc.var_screeninfo);
 #endif
 		} else {
 			rc = fb_find_mode(&fb_var, fbi, xylonfb_mode_option,
@@ -1052,7 +1075,7 @@ static int xylonfb_set_timings(struct fb_info *fbi, int bpp)
 				return -EINVAL;
 #if defined(CONFIG_FB_XYLON_MISC)
 			if ((fbi->monspecs.modedb) &&
-			    (data->misc->monspecs->misc & FB_MISC_1ST_DETAIL)) {
+			    (data->misc.monspecs->misc & FB_MISC_1ST_DETAIL)) {
 				xres = fbi->monspecs.modedb[0].xres;
 				yres = fbi->monspecs.modedb[0].yres;
 			} else {
@@ -1068,10 +1091,9 @@ static int xylonfb_set_timings(struct fb_info *fbi, int bpp)
 		rc = fb_find_mode(&fb_var, fbi, xylonfb_mode_option, NULL, 0,
 				  &xylonfb_vm.vmode, bpp);
 	}
-#ifdef DEBUG
 	switch (rc) {
 	case 0:
-		pr_err("failed find video mode\n"
+		dev_err(fbi->dev, "failed find video mode\n"
 			"using driver default mode %dx%dM-%d@%d\n",
 			xylonfb_vm.vmode.xres,
 			xylonfb_vm.vmode.yres,
@@ -1079,26 +1101,25 @@ static int xylonfb_set_timings(struct fb_info *fbi, int bpp)
 			xylonfb_vm.vmode.refresh);
 		break;
 	case 1:
-		XYLONFB_DBG(INFO, "video mode %s", xylonfb_mode_option);
+		dev_dbg(fbi->dev, "video mode %s", xylonfb_mode_option);
 		break;
 	case 2:
-		pr_notice("video mode %s with ignored refresh rate\n",
-			  xylonfb_mode_option);
+		dev_warn(fbi->dev, "video mode %s with ignored refresh rate\n",
+			 xylonfb_mode_option);
 		break;
 	case 3:
-		pr_notice("default video mode %dx%dM-%d@%d\n",
-			  xylonfb_vm.vmode.xres,
-			  xylonfb_vm.vmode.yres,
-			  bpp,
-			  xylonfb_vm.vmode.refresh);
+		dev_warn(fbi->dev, "default video mode %dx%dM-%d@%d\n",
+			 xylonfb_vm.vmode.xres,
+			 xylonfb_vm.vmode.yres,
+			 bpp,
+			 xylonfb_vm.vmode.refresh);
 		break;
 	case 4:
-		pr_notice("video mode fallback\n");
+		dev_warn(fbi->dev, "video mode fallback\n");
 		break;
 	default:
 		break;
 	}
-#endif
 
 	data->vm_active.ctrl = data->vm.ctrl;
 	data->vm_active.vmode.xres = fb_var.xres;
@@ -1138,6 +1159,7 @@ static int xylonfb_register_fb(struct fb_info *fbi,
 			       struct xylonfb_layer_data *ld, int id,
 			       int *regfb)
 {
+	struct device *dev = fbi->dev;
 	struct xylonfb_data *data = ld->data;
 	struct xylonfb_layer_fix_data *fd = ld->fd;
 	int transp;
@@ -1158,7 +1180,7 @@ static int xylonfb_register_fb(struct fb_info *fbi,
 		if (!xylonfb_set_timings(fbi, fbi->var.bits_per_pixel))
 			data->flags |= XYLONFB_FLAGS_VMODE_DEFAULT;
 		else
-			pr_err("videomode not set\n");
+			dev_err(dev,"videomode not set\n");
 	}
 	xylonfb_set_fbi_var_screeninfo(&fbi->var, data);
 	fbi->mode = &data->vm_active.vmode;
@@ -1178,10 +1200,10 @@ static int xylonfb_register_fb(struct fb_info *fbi,
 	 */
 	*regfb = register_framebuffer(fbi);
 	if (*regfb) {
-		pr_err("failed register fb %d\n", id);
+		dev_err(dev,"failed register fb %d\n", id);
 		return -EINVAL;
 	}
-	pr_info("fb %d registered\n", id);
+	dev_warn(dev, "fb %d registered\n", id);
 
 	return 0;
 }
@@ -1190,26 +1212,32 @@ static void xylonfb_layer_initialize(struct xylonfb_layer_data *ld)
 {
 	struct xylonfb_data *data = ld->data;
 	struct xylonfb_layer_fix_data *fd = ld->fd;
-	u32 reg;
+	u32 reg = ld->data->reg_access.get_reg_val(ld->base,
+						   LOGICVC_LAYER_CTRL_ROFF,
+						   ld);
 
-	if (fd->component_swap) {
-		reg = ld->data->reg_access.get_reg_val(ld->base,
-						       LOGICVC_LAYER_CTRL_ROFF,
-						       ld);
-		reg |= LOGICVC_LAYER_CTRL_PIXEL_FORMAT_BIT_ABGR;
-		ld->data->reg_access.set_reg_val(reg, ld->base,
-						 LOGICVC_LAYER_CTRL_ROFF,
-						 ld);
-	}
-	data->reg_access.set_reg_val(ld->fb_pbase, ld->base,
-				     LOGICVC_LAYER_ADDR_ROFF,
-				     ld);
+	XYLONFB_DBG(INFO, "%s", __func__);
+
+	reg |= LOGICVC_LAYER_CTRL_COLOR_TRANSPARENCY_DISABLE;
+	if (fd->component_swap)
+		reg |= LOGICVC_LAYER_CTRL_PIXEL_FORMAT_ABGR;
+	ld->data->reg_access.set_reg_val(reg, ld->base,
+					 LOGICVC_LAYER_CTRL_ROFF,
+					 ld);
+
+	if (data->flags & XYLONFB_FLAGS_DYNAMIC_LAYER_ADDRESS)
+		data->reg_access.set_reg_val(ld->fb_pbase, ld->base,
+					     LOGICVC_LAYER_ADDR_ROFF,
+					     ld);
 }
 
 static int xylonfb_vmem_init(struct xylonfb_layer_data *ld, int id, bool *mmap)
 {
 	struct xylonfb_data *data = ld->data;
 	struct xylonfb_layer_fix_data *fd = ld->fd;
+	struct device *dev = &data->pdev->dev;
+
+	XYLONFB_DBG(INFO, "%s", __func__);
 
 	if (fd->address) {
 		ld->fb_pbase = fd->address;
@@ -1221,7 +1249,7 @@ static int xylonfb_vmem_init(struct xylonfb_layer_data *ld, int id, bool *mmap)
 			ld->fb_base = (__force void *)ioremap_wc(ld->fb_pbase,
 								 ld->fb_size);
 			if (!ld->fb_base) {
-				pr_err("failed map video memory\n");
+				dev_err(dev,"failed map video memory\n");
 				return -EINVAL;
 			}
 		}
@@ -1238,7 +1266,7 @@ static int xylonfb_vmem_init(struct xylonfb_layer_data *ld, int id, bool *mmap)
 						 PAGE_ALIGN(ld->fb_size),
 						 &ld->fb_pbase, GFP_KERNEL);
 		if (!ld->fb_base) {
-			pr_err("failed allocate video buffer ID%d\n", id);
+			dev_err(dev,"failed allocate video buffer ID%d\n", id);
 			return -ENOMEM;
 		}
 
@@ -1281,6 +1309,7 @@ static void xylonfb_logicvc_disp_ctrl(struct fb_info *fbi, bool enable)
 static void xylonfb_logicvc_layer_enable(struct fb_info *fbi, bool enable)
 {
 	struct xylonfb_layer_data *ld = fbi->par;
+	struct xylonfb_data *data = ld->data;
 	u32 reg;
 
 	XYLONFB_DBG(INFO, "%s", __func__);
@@ -1301,8 +1330,9 @@ static void xylonfb_logicvc_layer_enable(struct fb_info *fbi, bool enable)
 					 LOGICVC_LAYER_CTRL_ROFF,
 					 ld);
 
-	/* Latest core seems to need layer address re-set after enabling */
-	ld->data->reg_access.set_reg_val(ld->fb_pbase_active, ld->base,
+	/* Latest core v4 seems to need layer address re-set after enabling. Must be something to do with triggering geometry registers update. */
+	if(data->major>=4)
+		ld->data->reg_access.set_reg_val(ld->fb_pbase_active, ld->base,
 				     LOGICVC_LAYER_ADDR_ROFF, ld);
 
 }
@@ -1418,26 +1448,10 @@ static void xylonfb_start(struct fb_info **afbi, int layers)
 	}
 }
 
-static int xylonfb_event_notify(struct notifier_block *nb,
-				unsigned long event, void *data)
-{
-	struct fb_event *fbe = data;
-	struct fb_info *fbi = fbe->info;
-	int ret = 0;
-
-	XYLONFB_DBG(INFO, "%s", __func__);
-
-	switch (event) {
-	case XYLONFB_EVENT_FBI_UPDATE:
-		xylonfb_fbi_update(fbi);
-		break;
-	}
-
-	return ret;
-}
-
 static void xylonfb_get_vmode_opts(struct xylonfb_data *data)
 {
+	XYLONFB_DBG(INFO, "%s", __func__);
+
 	char *s, *opt, *ext, *c;
 
 	if ((data->flags & XYLONFB_FLAGS_EDID_VMODE) &&
@@ -1468,6 +1482,8 @@ static void xylonfb_get_vmode_opts(struct xylonfb_data *data)
 
 static bool xylonfb_allow_console(struct xylonfb_layer_fix_data *fd)
 {
+	XYLONFB_DBG(INFO, "%s", __func__);
+
 	switch (fd->format) {
 	case XYLONFB_FORMAT_C8:
 	case XYLONFB_FORMAT_RGB332:
@@ -1510,7 +1526,7 @@ int xylonfb_init_core(struct xylonfb_data *data)
 
 	dev_base = devm_ioremap_resource(dev, &data->resource_mem);
 	if (IS_ERR(dev_base)) {
-		pr_err("failed ioremap mem resource\n");
+		dev_err(dev,"failed ioremap mem resource\n");
 		return PTR_ERR(dev_base);
 	}
 	data->dev_base = dev_base;
@@ -1519,30 +1535,35 @@ int xylonfb_init_core(struct xylonfb_data *data)
 	ret = devm_request_irq(dev, data->irq, xylonfb_isr, IRQF_TRIGGER_HIGH,
 			       XYLONFB_DEVICE_NAME, dev);
 	if (ret)
-		return -EINVAL;
+		return ret;
 
 	ip_ver = readl(dev_base + LOGICVC_IP_VERSION_ROFF);
-	pr_info("logiCVC IP core %d.%02d.%c\n",
-		((ip_ver >> LOGICVC_MAJOR_REVISION_SHIFT) &
-		LOGICVC_MAJOR_REVISION_MASK),
-		((ip_ver >> LOGICVC_MINOR_REVISION_SHIFT) &
-		LOGICVC_MINOR_REVISION_MASK),
-		((ip_ver & LOGICVC_PATCH_LEVEL_MASK) + 'a'));
+	ip_ver = readl(dev_base + LOGICVC_IP_VERSION_ROFF);
+	data->major = (ip_ver >> LOGICVC_MAJOR_REVISION_SHIFT) &
+		      LOGICVC_MAJOR_REVISION_MASK;
+	data->minor = (ip_ver >> LOGICVC_MINOR_REVISION_SHIFT) &
+		      LOGICVC_MINOR_REVISION_MASK;
+	data->patch = ip_ver & LOGICVC_PATCH_LEVEL_MASK;
+	dev_info(dev, "logiCVC IP core %d.%02d.%c\n",
+		 data->major, data->minor, ('a' + data->patch));
+
+	if (data->major >= 4)
+		data->flags |= XYLONFB_FLAGS_DYNAMIC_LAYER_ADDRESS;
 
 	layers = data->layers;
 	if (layers == 0) {
-		pr_err("no available layers\n");
+		dev_err(dev,"no available layers\n");
 		return -ENODEV;
 	}
 	console_layer = data->console_layer;
 	if (console_layer >= layers) {
-		pr_err("invalid console layer ID\n");
+		dev_err(dev,"invalid console layer ID\n");
 		console_layer = 0;
 	}
 
 	if (data->flags & XYLONFB_FLAGS_CHECK_CONSOLE_LAYER) {
 		if (!xylonfb_allow_console(data->fd[console_layer])) {
-			pr_err("invalid console layer format\n");
+			dev_err(dev,"invalid console layer format\n");
 			return -EINVAL;
 		}
 		data->flags &= ~XYLONFB_FLAGS_CHECK_CONSOLE_LAYER;
@@ -1551,9 +1572,8 @@ int xylonfb_init_core(struct xylonfb_data *data)
 	size = sizeof(struct fb_info *);
 	afbi = devm_kzalloc(dev, (size * layers), GFP_KERNEL);
 	if (!afbi) {
-		pr_err("failed allocate internal data\n");
-		ret = -ENOMEM;
-		goto err_mem;
+		dev_err(dev,"failed allocate internal data\n");
+		return -ENOMEM;
 	}
 
 	if (data->flags & XYLONFB_FLAGS_READABLE_REGS) {
@@ -1561,35 +1581,30 @@ int xylonfb_init_core(struct xylonfb_data *data)
 		data->reg_access.set_reg_val = xylonfb_set_reg;
 	} else {
 		size = sizeof(struct xylonfb_registers);
-		data->reg_list = devm_kzalloc(dev, size, GFP_KERNEL);
 		data->reg_access.get_reg_val = xylonfb_get_reg_mem;
 		data->reg_access.set_reg_val = xylonfb_set_reg_mem;
 	}
 
-	data->coeff.cyr = 29900;
-	data->coeff.cyg = 58700;
-	data->coeff.cyb = 11400;
+	data->coeff.cyr = LOGICVC_COEFF_Y_R;
+	data->coeff.cyg = LOGICVC_COEFF_Y_G;
+	data->coeff.cyb = LOGICVC_COEFF_Y_B;
 	if (data->flags & XYLONFB_FLAGS_DISPLAY_INTERFACE_ITU656) {
-		data->coeff.cy = 1600000;
-		data->coeff.cur = 17258;
-		data->coeff.cug = 33881;
-		data->coeff.cub = 51140;
-		data->coeff.cvr = 51138;
-		data->coeff.cvg = 42820;
-		data->coeff.cvb = 8316;
+		data->coeff.cy = LOGICVC_COEFF_ITU656_Y;
+		data->coeff.cur = LOGICVC_COEFF_ITU656_U_R;
+		data->coeff.cug = LOGICVC_COEFF_ITU656_U_G;
+		data->coeff.cub = LOGICVC_COEFF_ITU656_U_B;
+		data->coeff.cvr = LOGICVC_COEFF_ITU656_V_R;
+		data->coeff.cvg = LOGICVC_COEFF_ITU656_V_G;
+		data->coeff.cvb = LOGICVC_COEFF_ITU656_V_B;
 	} else {
-		data->coeff.cy = 0;
-		data->coeff.cur = 16868;
-		data->coeff.cug = 33107;
-		data->coeff.cub = 49970;
-		data->coeff.cvr = 49980;
-		data->coeff.cvg = 41850;
-		data->coeff.cvb = 8128;
+		data->coeff.cy = LOGICVC_COEFF_Y;
+		data->coeff.cur = LOGICVC_COEFF_U_R;
+		data->coeff.cug = LOGICVC_COEFF_U_G;
+		data->coeff.cub = LOGICVC_COEFF_U_B;
+		data->coeff.cvr = LOGICVC_COEFF_V_R;
+		data->coeff.cvg = LOGICVC_COEFF_V_G;
+		data->coeff.cvb = LOGICVC_COEFF_V_B;
 	}
-
-	BLOCKING_INIT_NOTIFIER_HEAD(&data->notifier_list);
-	data->nb.notifier_call = xylonfb_event_notify;
-	blocking_notifier_chain_register(&data->notifier_list, &data->nb);
 
 	atomic_set(&data->refcount, 0);
 
@@ -1603,12 +1618,15 @@ int xylonfb_init_core(struct xylonfb_data *data)
 	xylonfb_get_vmode_opts(data);
 
 	if (data->pixel_clock) {
-		if (xylonfb_hw_pixclk_supported(dev, data->pixel_clock))
+		if (xylonfb_hw_pixclk_supported(dev, data->pixel_clock)) {
 			data->flags |= XYLONFB_FLAGS_PIXCLK_VALID;
-		else
-			pr_info("pixel clock not supported\n");
+		} else {
+			dev_warn(dev, "pixel clock not supported\n");
+			ret = -EPROBE_DEFER;
+			goto err_probe;
+		}
 	} else {
-		pr_info("external pixel clock\n");
+		dev_info(dev, "external pixel clock\n");
 	}
 
 	ld = NULL;
@@ -1628,10 +1646,11 @@ int xylonfb_init_core(struct xylonfb_data *data)
 		size = sizeof(struct xylonfb_layer_data);
 		fbi = framebuffer_alloc(size, dev);
 		if (!fbi) {
-			pr_err("failed allocate fb info\n");
+			dev_err(dev,"failed allocate fb info\n");
 			ret = -ENOMEM;
-			goto err_fb;
+			goto err_probe;
 		}
+		fbi->dev = dev;
 		afbi[i] = fbi;
 
 		ld = fbi->par;
@@ -1645,33 +1664,19 @@ int xylonfb_init_core(struct xylonfb_data *data)
 		ld->clut_base = dev_base + clut_base_off[i];
 
 #if defined(CONFIG_FB_XYLON_MISC)
-		if (!data->misc) {
-			size = sizeof(struct xylonfb_misc_data);
-			data->misc = devm_kzalloc(dev, size, GFP_KERNEL);
-			if (data->misc) {
 				xylonfb_misc_init(fbi);
-			} else {
-				pr_err("failed allocate misc internal data\n");
-				ret = -ENOMEM;
-				goto err_fb;
-			}
-		}
 #endif
 
 		ret = xylonfb_vmem_init(ld, i, &memmap);
 		if (ret)
-			goto err_fb;
+			goto err_probe;
 
-		if (!(data->flags & XYLONFB_FLAGS_READABLE_REGS)) {
-			size = sizeof(struct xylonfb_layer_registers);
-			ld->reg_list = devm_kzalloc(dev, size, GFP_KERNEL);
-		}
 
 		xylonfb_layer_initialize(ld);
 
 		ret = xylonfb_register_fb(fbi, ld, i, &regfb[i]);
 		if (ret)
-			goto err_fb;
+			goto err_probe;
 
 		if (console_layer >= 0)
 			fbi->monspecs = afbi[console_layer]->monspecs;
@@ -1702,14 +1707,13 @@ int xylonfb_init_core(struct xylonfb_data *data)
 						     LOGICVC_INT_MASK_ROFF,
 						     ld);
 	} else {
-		pr_warn("initialization not completed\n");
+		dev_warn(dev, "initialization not completed\n");
 	}
 
 	if (data->flags & XYLONFB_FLAGS_BACKGROUND_LAYER)
-		pr_info("BG layer: %s@%dbpp",
+		dev_info(dev, "BG layer: %s@%dbpp",
 			data->flags & XYLONFB_FLAGS_BACKGROUND_LAYER_RGB ? \
-				"RGB" : "YUV", 
-			data->bg_layer_bpp);
+					 "RGB" : "YUV", data->bg_layer_bpp);
 
 	mutex_init(&data->irq_mutex);
 	init_waitqueue_head(&data->vsync.wait);
@@ -1725,9 +1729,7 @@ int xylonfb_init_core(struct xylonfb_data *data)
 
 	return 0;
 
-err_fb:
-	if (data->irq != 0)
-		devm_free_irq(dev, data->irq, dev);
+err_probe:
 	for (i = layers - 1; i >= 0; i--) {
 		fbi = afbi[i];
 		if (!fbi)
@@ -1741,6 +1743,7 @@ err_fb:
 			fb_dealloc_cmap(&fbi->cmap);
 		if (ld) {
 			if (data->flags & XYLONFB_FLAGS_DMA_BUFFER) {
+				if (ld->fb_base)
 				dma_free_coherent(dev,
 					PAGE_ALIGN(ld->fb_size),
 					ld->fb_base, ld->fb_pbase);
@@ -1748,22 +1751,11 @@ err_fb:
 				if (ld->fb_base)
 					iounmap((void __iomem *)ld->fb_base);
 			}
-			devm_kfree(dev, ld->reg_list);
 			kfree(fbi->pseudo_palette);
 			framebuffer_release(fbi);
 		}
 	}
 
-err_mem:
-	if (data) {
-		devm_kfree(dev, data->reg_list);
-#if defined(CONFIG_FB_XYLON_MISC)
-		devm_kfree(dev, data->misc);
-#endif
-	}
-	devm_kfree(dev, afbi);
-
-	dev_set_drvdata(dev, NULL);
 
 	return ret;
 }
@@ -1780,7 +1772,7 @@ int xylonfb_deinit_core(struct platform_device *pdev)
 	XYLONFB_DBG(INFO, "%s", __func__);
 
 	if (atomic_read(&data->refcount) != 0) {
-		pr_err("driver in use\n");
+		dev_err(dev,"driver in use\n");
 		return -EINVAL;
 	}
 
@@ -1790,7 +1782,7 @@ int xylonfb_deinit_core(struct platform_device *pdev)
 	xylonfb_misc_deinit(fbi);
 #endif
 
-	xylonfb_hw_pixclk_unload();
+	xylonfb_hw_pixclk_unload(data->pixel_clock);
 
 	for (i = data->layers - 1; i >= 0; i--) {
 		fbi = afbi[i];

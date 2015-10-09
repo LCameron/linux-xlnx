@@ -19,23 +19,25 @@
 
 #include <linux/fb.h>
 #include <linux/mutex.h>
-#include <linux/notifier.h>
 #include <linux/wait.h>
-#include <linux/xylonfb.h>
 
-#define XYLONFB_DRIVER_NAME "xylon-fb"
+#if defined(CONFIG_FB_XYLON_MISC)
+#include "xylonfb_misc.h"
+#endif
+
+#define XYLONFB_DRIVER_NAME "xylonfb"
 #define XYLONFB_DEVICE_NAME "logicvc"
 #define XYLONFB_DRIVER_DESCRIPTION "Xylon logiCVC frame buffer driver"
 #define XYLONFB_DRIVER_VERSION "3.0"
 
-#define DEBUG_LEVEL	0
-#define CORE		1
-#define INFO		2
+#define INFO		1
+#define CORE		2
+#define DEBUG_LEVEL	CORE
 
 #ifdef DEBUG
 #define XYLONFB_DBG(level, format, ...)				\
 	do {							\
-		if (level > DEBUG_LEVEL)			\
+		if (level >= DEBUG_LEVEL)			\
 			pr_info(format "\n", ## __VA_ARGS__);	\
 	} while (0)
 #else
@@ -54,21 +56,22 @@
 #define XYLONFB_FLAGS_BACKGROUND_LAYER_RGB	(1 << 3)
 #define XYLONFB_FLAGS_BACKGROUND_LAYER_YUV	(1 << 4)
 #define XYLONFB_FLAGS_DISPLAY_INTERFACE_ITU656	(1 << 5)
-#define XYLONFB_FLAGS_CHECK_CONSOLE_LAYER	(1 << 6)
-#define XYLONFB_FLAGS_PIXCLK_VALID		(1 << 7)
-#define XYLONFB_FLAGS_DMA_BUFFER		(1 << 8)
-#define XYLONFB_FLAGS_EDID_VMODE		(1 << 9)
-#define XYLONFB_FLAGS_EDID_PRINT		(1 << 10)
-#define XYLONFB_FLAGS_EDID_READY		(1 << 11)
-#define XYLONFB_FLAGS_VSYNC_IRQ			(1 << 12)
-#define XYLONFB_FLAGS_VMODE_CUSTOM		(1 << 13)
-#define XYLONFB_FLAGS_VMODE_INIT		(1 << 14)
-#define XYLONFB_FLAGS_VMODE_DEFAULT		(1 << 15)
-#define XYLONFB_FLAGS_VMODE_SET			(1 << 16)
-#define XYLONFB_FLAGS_LAYER_ENABLED		(1 << 17)
-#define XYLONFB_FLAGS_MISC_ADV7511		(1 << 18)
-#define XYLONFB_FLAGS_ADV7511_SKIP		(1 << 19)
-#define XYLONFB_FLAGS_ACTIVATE_NEXT_OPEN	(1 << 20)
+#define XYLONFB_FLAGS_DYNAMIC_LAYER_ADDRESS	(1 << 6)
+#define XYLONFB_FLAGS_CHECK_CONSOLE_LAYER	(1 << 7)
+#define XYLONFB_FLAGS_PIXCLK_VALID		(1 << 8)
+#define XYLONFB_FLAGS_DMA_BUFFER		(1 << 9)
+#define XYLONFB_FLAGS_EDID_VMODE		(1 << 10)
+#define XYLONFB_FLAGS_EDID_PRINT		(1 << 11)
+#define XYLONFB_FLAGS_EDID_READY		(1 << 12)
+#define XYLONFB_FLAGS_VSYNC_IRQ			(1 << 13)
+#define XYLONFB_FLAGS_VMODE_CUSTOM		(1 << 14)
+#define XYLONFB_FLAGS_VMODE_INIT		(1 << 15)
+#define XYLONFB_FLAGS_VMODE_DEFAULT		(1 << 16)
+#define XYLONFB_FLAGS_VMODE_SET			(1 << 17)
+#define XYLONFB_FLAGS_LAYER_ENABLED		(1 << 18)
+#define XYLONFB_FLAGS_MISC_ADV7511		(1 << 19)
+#define XYLONFB_FLAGS_ADV7511_SKIP		(1 << 20)
+#define XYLONFB_FLAGS_ACTIVATE_NEXT_OPEN	(1 << 21)
 
 /* Xylon FB driver color formats */
 enum xylonfb_color_format {
@@ -107,8 +110,19 @@ struct xylonfb_registers {
 	u32 int_mask;
 };
 
-struct xylonfb_layer_registers {
+union xylonfb_layer_reg_0 {
 	u32 addr;
+	u32 hoff;
+};
+
+union xylonfb_layer_reg_1 {
+	u32 unused;
+	u32 voff;
+};
+
+struct xylonfb_layer_registers {
+	union xylonfb_layer_reg_0 reg_0;
+	union xylonfb_layer_reg_1 reg_1;
 	u32 hpos;
 	u32 vpos;
 	u32 hsize;
@@ -119,10 +133,10 @@ struct xylonfb_layer_registers {
 };
 
 struct xylonfb_register_access {
-	u32 (*get_reg_val)(void __iomem *dev_base, unsigned long offset,
+	u32 (*get_reg_val)(void __iomem *dev_base, unsigned int offset,
 			   struct xylonfb_layer_data *layer_data);
 	void (*set_reg_val)(u32 value, void __iomem *dev_base,
-			    unsigned long offset,
+			    unsigned int offset,
 			    struct xylonfb_layer_data *layer_data);
 };
 
@@ -148,7 +162,7 @@ struct xylonfb_layer_data {
 
 	struct xylonfb_data *data;
 	struct xylonfb_layer_fix_data *fd;
-	struct xylonfb_layer_registers *reg_list;
+	struct xylonfb_layer_registers regs;
 
 	dma_addr_t pbase;
 	void __iomem *base;
@@ -161,6 +175,10 @@ struct xylonfb_layer_data {
 	dma_addr_t fb_pbase_active;
 
 	u8 triple_buffer_active_number;
+
+	/* the offset or cropping; pixel (xoff,yoff) becomes the top left pixel of the layer */
+	u16 xoff;
+	u16 yoff;
 
 	u32 flags;
 };
@@ -187,7 +205,6 @@ struct xylonfb_data {
 	struct platform_device *pdev;
 
 	struct device_node *device;
-	struct device_node *encoder;
 	struct device_node *pixel_clock;
 
 	struct resource resource_mem;
@@ -197,9 +214,6 @@ struct xylonfb_data {
 
 	struct mutex irq_mutex;
 
-	struct blocking_notifier_head notifier_list;
-	struct notifier_block nb;
-
 	struct xylonfb_register_access reg_access;
 	struct xylonfb_sync vsync;
 	struct xylonfb_vmode vm;
@@ -207,9 +221,9 @@ struct xylonfb_data {
 	struct xylonfb_rgb2yuv_coeff coeff;
 
 	struct xylonfb_layer_fix_data *fd[LOGICVC_MAX_LAYERS];
-	struct xylonfb_registers *reg_list;
+	struct xylonfb_registers regs;
 #if defined(CONFIG_FB_XYLON_MISC)
-	struct xylonfb_misc_data *misc;
+	struct xylonfb_misc_data misc;
 #endif
 
 	u32 bg_layer_bpp;
@@ -219,7 +233,6 @@ struct xylonfb_data {
 	atomic_t refcount;
 
 	u32 flags;
-	u32 hw_flags;
 	int irq;
 	u8 layers;
 	/*
@@ -232,6 +245,10 @@ struct xylonfb_data {
 	 * before applying display backlight power supply
 	 */
 	u32 sig_delay;
+	/* IP version */
+	u8 major;
+	u8 minor;
+	u8 patch;
 };
 
 /* Xylon FB video mode options */
@@ -240,8 +257,8 @@ extern char *xylonfb_mode_option;
 /* Xylon FB core pixel clock interface functions */
 extern bool xylonfb_hw_pixclk_supported(struct device *dev,
 					struct device_node *dn);
-extern void xylonfb_hw_pixclk_unload(void);
-extern int xylonfb_hw_pixclk_set(struct device_node *dn,
+extern void xylonfb_hw_pixclk_unload(struct device_node *dn);
+extern int xylonfb_hw_pixclk_set(struct device *dev, struct device_node *dn,
 				 unsigned long pixclk_khz);
 
 /* Xylon FB core V sync wait function */

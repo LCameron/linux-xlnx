@@ -14,7 +14,10 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/platform_device.h>
 #include <linux/uaccess.h>
+#include <uapi/linux/xylonfb.h>
+
 #include "logicvc.h"
 #include "xylonfb_core.h"
 #if defined(CONFIG_FB_XYLON_MISC)
@@ -137,6 +140,34 @@ static int xylonfb_layer_alpha(struct xylonfb_layer_data *ld, u8 *alpha,
 	return 0;
 }
 
+static int xylonfb_layer_buff(struct fb_info *fbi,
+			      struct xylonfb_layer_buffer *layer_buff,
+			      bool set)
+{
+	struct xylonfb_layer_data *ld = fbi->par;
+	unsigned int layer_id = ld->fd->id;
+	u32 reg;
+
+	if (set) {
+		if (layer_buff->id >= LOGICVC_MAX_LAYER_BUFFERS)
+			return -EINVAL;
+
+		reg = readl(ld->data->dev_base + LOGICVC_VBUFF_SELECT_ROFF);
+		reg |= (1 << (10 + layer_id));
+		reg &= ~(0x03 << (layer_id << 1));
+		reg |= (layer_buff->id << (layer_id << 1));
+		writel(reg, ld->data->dev_base + LOGICVC_VBUFF_SELECT_ROFF);
+
+		xylonfb_vsync_wait(0, fbi);
+	} else {
+		reg = readl(ld->data->dev_base + LOGICVC_VBUFF_SELECT_ROFF);
+		reg >>= ((layer_id << 1));
+		layer_buff->id = reg & 0x03;
+	}
+
+	return 0;
+}
+
 static void xylonfb_rgb_yuv(u32 c1, u32 c2, u32 c3, u32 *pixel,
 			    struct xylonfb_layer_data *ld, bool rgb2yuv)
 {
@@ -145,18 +176,24 @@ static void xylonfb_rgb_yuv(u32 c1, u32 c2, u32 c3, u32 *pixel,
 
 	if (rgb2yuv) {
 		y = ((data->coeff.cyr * c1) + (data->coeff.cyg * c2) +
-		     (data->coeff.cyb * c3) + data->coeff.cy) / 100000;
+		     (data->coeff.cyb * c3) + data->coeff.cy) /
+		     LOGICVC_YUV_NORM;
 		u = ((-data->coeff.cur * c1) - (data->coeff.cug * c2) +
-		     (data->coeff.cub * c3) + 12800000) / 100000;
+		     (data->coeff.cub * c3) + LOGICVC_COEFF_U) /
+		     LOGICVC_YUV_NORM;
 		v = ((data->coeff.cvr * c1) - (data->coeff.cvg * c2) -
-		     (data->coeff.cvb * c3) + 12800000) / 100000;
+		     (data->coeff.cvb * c3) + LOGICVC_COEFF_V) /
+		     LOGICVC_YUV_NORM;
 
 		*pixel = (0xFF << 24) | (y << 16) | (u << 8) | v;
 	} else {
-		r = ((c1 * 1000000) + (1402524 * c2) - 179000000) / 1000000;
-		g = ((c1 * 1000000) - (714403 * c2) - (344340 * c3) +
-		    135000000) / 1000000;
-		b = ((c1 * 1000000) - (1773049 * c3) - 226000000) / 1000000;
+		r = ((c1 * LOGICVC_RGB_NORM) + (LOGICVC_COEFF_R_U * c2) -
+		     LOGICVC_COEFF_R) / LOGICVC_RGB_NORM;
+		g = ((c1 * LOGICVC_RGB_NORM) - (LOGICVC_COEFF_G_U * c2) -
+		     (LOGICVC_COEFF_G_V * c3) + LOGICVC_COEFF_G) /
+		     LOGICVC_RGB_NORM;
+		b = ((c1 * LOGICVC_RGB_NORM) - (LOGICVC_COEFF_B_V * c3) -
+		     LOGICVC_COEFF_B) / LOGICVC_RGB_NORM;
 
 		*pixel = (0xFF << 24) | (r << 16) | (g << 8) | b;
 	}
@@ -169,7 +206,8 @@ static int xylonfb_layer_color_rgb(struct xylonfb_layer_data *ld,
 	struct xylonfb_data *data = ld->data;
 	struct xylonfb_layer_fix_data *fd = ld->fd;
 	void __iomem *base;
-	u32 raw_rgb, r, g, b, y, u, v;
+	u32 r = 0, g = 0, b = 0;
+	u32 raw_rgb, y, u, v;
 	int bpp, transparency;
 
 	if (reg_offset == LOGICVC_LAYER_TRANSP_COLOR_ROFF) {
@@ -289,7 +327,7 @@ static int xylonfb_layer_geometry(struct fb_info *fbi,
 	struct xylonfb_layer_data *ld = fbi->par;
 	struct xylonfb_data *data = ld->data;
 	struct xylonfb_layer_fix_data *fd = ld->fd;
-	u32 x, y, width, height, xres, yres;
+	u32 x, y, width, height, xoff, yoff, xres, yres;
 
 	xres = fbi->var.xres;
 	yres = fbi->var.yres;
@@ -299,6 +337,8 @@ static int xylonfb_layer_geometry(struct fb_info *fbi,
 		y = layer_geometry->y;
 		width = layer_geometry->width;
 		height = layer_geometry->height;
+		xoff = layer_geometry->x_offset;
+		yoff = layer_geometry->y_offset;
 
 		if ((x > xres) || (y > yres))
 			return -EINVAL;
@@ -314,10 +354,31 @@ static int xylonfb_layer_geometry(struct fb_info *fbi,
 			height = yres - y;
 			layer_geometry->height = height;
 		}
+
+		//TODO: check xoff yoff
+
 		/* YUV 4:2:2 layer type can only have even layer width */
 		if ((width > 2) && (fd->type == LOGICVC_LAYER_YUV) &&
 		    (fd->bpp == 16))
 			width &= ~((unsigned long) + 1);
+		/*
+		 * logiCVC 3.x registers write sequence:
+		 * offset, size, position with implicit last write to
+		 * LOGICVC_LAYER_VPOS_ROFF
+		 * logiCVC 4.x registers write sequence:
+		 * size, position with implicit last write to
+		 * LOGICVC_LAYER_ADDR_ROFF
+		 */
+		if (!(data->flags & XYLONFB_FLAGS_DYNAMIC_LAYER_ADDRESS)) {
+			data->reg_access.set_reg_val(layer_geometry->x_offset,
+						     ld->base,
+						     LOGICVC_LAYER_HOFF_ROFF,
+						     ld);
+			data->reg_access.set_reg_val(layer_geometry->y_offset,
+						     ld->base,
+						     LOGICVC_LAYER_VOFF_ROFF,
+						     ld);
+		}
 
 		data->reg_access.set_reg_val((width - 1), ld->base,
 					     LOGICVC_LAYER_HSIZE_ROFF,
@@ -331,8 +392,20 @@ static int xylonfb_layer_geometry(struct fb_info *fbi,
 		data->reg_access.set_reg_val((yres - (y + 1)), ld->base,
 					     LOGICVC_LAYER_VPOS_ROFF,
 					     ld);
-		data->reg_access.set_reg_val(ld->fb_pbase_active, ld->base,
-					     LOGICVC_LAYER_ADDR_ROFF, ld);
+
+
+		if (data->flags & XYLONFB_FLAGS_DYNAMIC_LAYER_ADDRESS) {
+			xoff = layer_geometry->x_offset * (ld->fd->bpp / 8);
+			yoff = layer_geometry->y_offset * ld->fd->width *
+			       (ld->fd->bpp / 8);
+
+			ld->fb_pbase_active = ld->fb_pbase + xoff + yoff;
+
+			data->reg_access.set_reg_val(ld->fb_pbase_active,
+						     ld->base,
+						     LOGICVC_LAYER_ADDR_ROFF,
+						     ld);
+		}
 	} else {
 		x = data->reg_access.get_reg_val(ld->base,
 						 LOGICVC_LAYER_HPOS_ROFF,
@@ -407,10 +480,11 @@ int xylonfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 	struct xylonfb_data *data = ld->data;
 	union {
 		struct fb_vblank vblank;
-		struct xylonfb_layer_transparency layer_transp;
+		struct xylonfb_hw_access hw_access;
+		struct xylonfb_layer_buffer layer_buff;
 		struct xylonfb_layer_color layer_color;
 		struct xylonfb_layer_geometry layer_geometry;
-		struct xylonfb_hw_access hw_access;
+		struct xylonfb_layer_transparency layer_transp;
 	} ioctl;
 	void __user *argp = (void __user *)arg;
 	unsigned long val;
@@ -478,9 +552,9 @@ int xylonfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 						     LOGICVC_LAYER_CTRL_ROFF,
 						     ld);
 		if (flag)
-			var32 |= LOGICVC_LAYER_CTRL_COLOR_TRANSPARENCY_BIT;
+			var32 |= LOGICVC_LAYER_CTRL_COLOR_TRANSPARENCY_DISABLE;
 		else
-			var32 &= ~LOGICVC_LAYER_CTRL_COLOR_TRANSPARENCY_BIT;
+			var32 &= ~LOGICVC_LAYER_CTRL_COLOR_TRANSPARENCY_DISABLE;
 		data->reg_access.set_reg_val(var32, ld->base,
 					     LOGICVC_LAYER_CTRL_ROFF,
 					     ld);
@@ -523,35 +597,60 @@ int xylonfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 		mutex_unlock(&ld->mutex);
 		break;
 
-	case XYLONFB_LAYER_BUFFER_OFFSET:
-		XYLONFB_DBG(INFO, "XYLONFB_LAYER_BUFFER_OFFSET");
-		var32 = ld->fd->buffer_offset;
-		put_user(var32, (unsigned long __user *)arg);
-		break;
-	case XYLONFB_LAYER_BUFFER_SWITCH: {
+	case XYLONFB_LAYER_BUFFER: {
 		u32 buffer_number=4;
-		uint triple_buffer_offset;
-		struct fb_var_screeninfo *var = &fbi->var;
-		struct xylonfb_layer_fix_data *fix = ld->fd;
-
 		if (copy_from_user(&buffer_number, argp,
 				   sizeof(buffer_number)))
 			return -EFAULT;
 		if(buffer_number < 0 || buffer_number > LOGICVC_MAX_LAYER_BUFFERS)
 			return -EINVAL;
-		ld->triple_buffer_active_number = (u8)buffer_number;
 
-		triple_buffer_offset = get_triple_buffer_offset(ld);
+		if(data->major >= 4){
 
-		ld->fb_pbase_active = ld->fb_pbase +
-					  ((var->xoffset * ( fix->bpp / 8)) +
-					  (var->yoffset * fix->width * (fix->bpp / 8))) +
-					  ((ld->triple_buffer_active_number * triple_buffer_offset) * (fix->bpp / 8));
-		data->reg_access.set_reg_val(ld->fb_pbase_active, ld->base,
-						 LOGICVC_LAYER_ADDR_ROFF, ld);
+			uint triple_buffer_offset;
+			struct fb_var_screeninfo *var = &fbi->var;
+			struct xylonfb_layer_fix_data *fix = ld->fd;
 
+			ld->triple_buffer_active_number = (u8)buffer_number;
+
+			triple_buffer_offset = get_triple_buffer_offset(ld);
+
+			ld->fb_pbase_active = ld->fb_pbase +
+						  ((var->xoffset * ( fix->bpp / 8)) +
+						  (var->yoffset * fix->width * (fix->bpp / 8))) +
+						  ((ld->triple_buffer_active_number * triple_buffer_offset) * fix->width *(fix->bpp / 8));
+			data->reg_access.set_reg_val(ld->fb_pbase_active, ld->base,
+							 LOGICVC_LAYER_ADDR_ROFF, ld);
+		} else {
+			if (copy_from_user(&ioctl.layer_buff, argp,
+					   sizeof(ioctl.layer_buff)))
+				return -EFAULT;
+
+			mutex_lock(&ld->mutex);
+			ret = xylonfb_layer_buff(fbi, &ioctl.layer_buff,
+						 ioctl.layer_buff.set);
+			if (!ret && !ioctl.layer_buff.set)
+				if (copy_to_user(argp, &ioctl.layer_buff,
+						 sizeof(ioctl.layer_buff)))
+					ret = -EFAULT;
+			mutex_unlock(&ld->mutex);
+
+		}
 		break;
 	}
+	case XYLONFB_LAYER_BUFFER_OFFSET:
+		if (data->major < 4) {
+			var32 = readl(ld->data->dev_base +
+				      LOGICVC_VBUFF_SELECT_ROFF);
+			var32 >>= (ld->fd->id << 1);
+			var32 &= 0x03;
+			val = ld->fd->buffer_offset;
+			val *= var32;
+		} else {
+			val = ld->fd->buffer_offset;
+		}
+		put_user(val, (unsigned long __user *)arg);
+		break;
 	case XYLONFB_BACKGROUND_COLOR:
 		XYLONFB_DBG(INFO, "XYLONFB_BACKGROUND_COLOR");
 		if (data->bg_layer_bpp == 0)
@@ -605,6 +704,12 @@ int xylonfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 				ret = -EFAULT;
 		break;
 
+	case XYLONFB_IP_CORE_VERSION:
+		var32 = (data->major << 16) | (data->minor << 8) | data->patch;
+		if (copy_to_user(argp, &var32, sizeof(u32)))
+			ret = -EFAULT;
+		break;
+
 	case XYLONFB_WAIT_EDID:
 		XYLONFB_DBG(INFO, "XYLONFB_WAIT_EDID");
 #if defined(CONFIG_FB_XYLON_MISC)
@@ -614,7 +719,7 @@ int xylonfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 		if ((val == 0) || (val < 0))
 			val = XYLONFB_EDID_WAIT_TOUT;
-		ret = wait_event_interruptible_timeout(data->misc->wait,
+		ret = wait_event_interruptible_timeout(data->misc.wait,
 						       (data->flags & XYLONFB_FLAGS_EDID_READY),
 						       (val * HZ));
 		if (ret == 0)
@@ -630,8 +735,8 @@ int xylonfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 		XYLONFB_DBG(INFO, "XYLONFB_GET_EDID");
 #if defined(CONFIG_FB_XYLON_MISC)
 		if (data->flags & XYLONFB_FLAGS_EDID_READY) {
-			if (data->misc->edid) {
-				if (copy_to_user(argp, data->misc->edid,
+			if (data->misc.edid) {
+				if (copy_to_user(argp, data->misc.edid,
 						 XYLONFB_EDID_SIZE))
 					ret = -EFAULT;
 			} else {
@@ -646,7 +751,7 @@ int xylonfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 		break;
 
 	default:
-		XYLONFB_DBG(INFO, "UNKNOWN_IOCTL");
+		dev_err(&data->pdev->dev, "unknown ioctl");
 		ret = -EINVAL;
 	}
 

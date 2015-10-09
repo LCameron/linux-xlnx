@@ -25,7 +25,7 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
 
-#include "adv7511.h"
+#include <media/adv7511.h>
 #include "xylonfb_adv7511.h"
 #include "xylonfb_core.h"
 #include "xylonfb_misc.h"
@@ -52,7 +52,7 @@ struct xylonfb_adv7511 {
 
 static struct xylonfb_adv7511 *adv7511;
 
-extern struct v4l2_subdev *adv7511_subdev(struct v4l2_subdev *sd);
+struct v4l2_subdev *adv7511_subdev(struct v4l2_subdev *sd);
 
 static void xylonfb_adv7511_get_monspecs(u8 *edid, struct fb_monspecs *monspecs,
 					 struct fb_var_screeninfo *var)
@@ -65,6 +65,8 @@ static void xylonfb_adv7511_get_monspecs(u8 *edid, struct fb_monspecs *monspecs,
 		pr_info("========================================\n");
 		pr_info("Display Information (EDID)\n");
 		pr_info("========================================\n");
+		pr_info("Monitor: %s\n", monspecs->monitor);
+		pr_info("Serial Number: %s\n", monspecs->serial_no);
 		pr_info("EDID Version %d.%d\n",
 			(int)monspecs->version, (int)monspecs->revision);
 		pr_info("Manufacturer: %s\n", monspecs->manufacturer);
@@ -197,7 +199,7 @@ static void xylonfb_adv7511_set_v4l2_timings(struct v4l2_subdev *sd,
 static int xylonfb_adv7511_update(struct fb_info *fbi)
 {
 	struct xylonfb_layer_data *ld = fbi->par;
-	struct xylonfb_misc_data *misc = ld->data->misc;
+	struct xylonfb_misc_data *misc = &ld->data->misc;
 	int ret;
 
 	XYLONFB_DBG(INFO, "%s", __func__);
@@ -290,11 +292,11 @@ static void xylonfb_adv7511_notify(struct v4l2_subdev *sd,
 
 		adv7511->sd_edid.pad = 0;
 		adv7511->sd_edid.start_block = 0;
-		adv7511->sd_edid.blocks = 1;
+		adv7511->sd_edid.blocks = 2;
 		adv7511->sd_edid.edid = (__u8 __user *)adv7511->edid;
 		ret = adv7511->sd->ops->pad->get_edid(sd, &adv7511->sd_edid);
 		if (ret) {
-			pr_warn("ADV7511 IOCTL error %d\n", ret);
+			pr_err("failed get EDID\n");
 			break;
 		}
 
@@ -325,7 +327,7 @@ int xylonfb_adv7511_register(struct fb_info *fbi)
 	struct i2c_client *client;
 	struct xylonfb_layer_data *ld = fbi->par;
 	struct xylonfb_data *data = ld->data;
-	struct xylonfb_misc_data *misc = data->misc;
+	struct xylonfb_misc_data *misc = &data->misc;
 	int ret;
 
 	XYLONFB_DBG(INFO, "%s", __func__);
@@ -407,17 +409,11 @@ int xylonfb_adv7511_register(struct fb_info *fbi)
 		if (adv7511->timeout) {
 			ret = wait_for_completion_timeout(&adv7511->edid_done,
 							  adv7511->timeout);
-		} else {
-			ret = 0;
 		}
 		adv7511->init = false;
-		if (ret == 0) {
-			if (adv7511->timeout) {
-				pr_err("ADV7511 EDID error\n");
-				return -ETIMEDOUT;
-			} else {
-				return -ENODEV;
-			}
+		if ((ret == 0) && (adv7511->timeout)) {
+			pr_err("ADV7511 EDID error\n");
+			return -ETIMEDOUT;
 		}
 	}
 
@@ -446,7 +442,7 @@ void xylonfb_adv7511_unregister(struct fb_info *fbi)
 	struct i2c_client *client = v4l2_get_subdevdata(adv7511->sd);
 	struct xylonfb_layer_data *ld = fbi->par;
 	struct xylonfb_data *data = ld->data;
-	struct xylonfb_misc_data *misc = data->misc;
+	struct xylonfb_misc_data *misc = &data->misc;
 
 	XYLONFB_DBG(INFO, "%s", __func__);
 

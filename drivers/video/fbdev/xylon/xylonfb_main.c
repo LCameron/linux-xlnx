@@ -20,11 +20,14 @@
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/platform_device.h>
+#include <video/of_display_timing.h>
+#include <video/of_videomode.h>
+#include <video/videomode.h>
 
 #include "xylonfb_core.h"
 #include "logicvc.h"
 
-static void xylonfb_init_ctrl(struct xylonfb_data *data, struct device_node *dn,
+static void xylonfb_init_ctrl(struct device_node *dn, enum display_flags flags,
 			      u32 *ctrl)
 {
 	u32 ctrl_reg = (LOGICVC_CTRL_HSYNC | LOGICVC_CTRL_VSYNC |
@@ -33,25 +36,25 @@ static void xylonfb_init_ctrl(struct xylonfb_data *data, struct device_node *dn,
 	XYLONFB_DBG(INFO, "%s", __func__);
 
 	if (of_property_read_bool(dn, "hsync-active-low") ||
-	    (data->hw_flags & LOGICVC_CTRL_HSYNC_INVERT))
+	    (flags & DISPLAY_FLAGS_HSYNC_LOW))
 		ctrl_reg |= LOGICVC_CTRL_HSYNC_INVERT;
 	if (of_property_read_bool(dn, "vsync-active-low") ||
-	    (data->hw_flags & LOGICVC_CTRL_VSYNC_INVERT))
+	    (flags & DISPLAY_FLAGS_VSYNC_LOW))
 		ctrl_reg |= LOGICVC_CTRL_VSYNC_INVERT;
 	if (of_property_read_bool(dn, "data-enable-active-low") ||
-	    (data->hw_flags & LOGICVC_CTRL_DATA_ENABLE_INVERT))
+	    (flags & DISPLAY_FLAGS_DE_LOW))
 		ctrl_reg |= LOGICVC_CTRL_DATA_ENABLE_INVERT;
-	if (of_property_read_bool(dn, "pixel-data-invert") ||
-	    (data->hw_flags & LOGICVC_CTRL_PIXEL_DATA_INVERT))
+	if (of_property_read_bool(dn, "pixel-data-invert"))
 		ctrl_reg |= LOGICVC_CTRL_PIXEL_DATA_INVERT;
 	if (of_property_read_bool(dn, "pixel-data-output-trigger-high") ||
-	    (data->hw_flags & LOGICVC_CTRL_PIXEL_DATA_TRIGGER_INVERT))
+	    (flags & DISPLAY_FLAGS_PIXDATA_POSEDGE))
 		ctrl_reg |= LOGICVC_CTRL_PIXEL_DATA_TRIGGER_INVERT;
 
 	*ctrl = ctrl_reg;
 }
 
-static int xylonfb_layer_set_format(struct xylonfb_layer_fix_data *fd)
+static int xylonfb_layer_set_format(struct xylonfb_layer_fix_data *fd,
+				    struct device *dev)
 {
 	XYLONFB_DBG(INFO, "%s", __func__);
 
@@ -125,7 +128,7 @@ static int xylonfb_layer_set_format(struct xylonfb_layer_fix_data *fd)
 		break;
 
 	default:
-		pr_err("unsupported layer type\n");
+		dev_err(dev, "unsupported layer type\n");
 		return -EINVAL;
 	}
 
@@ -135,6 +138,7 @@ static int xylonfb_layer_set_format(struct xylonfb_layer_fix_data *fd)
 static int xylonfb_parse_layer_info(struct device_node *parent_dn,
 				    struct xylonfb_data *data, int id)
 {
+	struct device *dev = &data->pdev->dev;
 	struct device_node *dn;
 	struct xylonfb_layer_fix_data *fd;
 	int ret;
@@ -153,7 +157,7 @@ static int xylonfb_parse_layer_info(struct device_node *parent_dn,
 	fd = devm_kzalloc(&data->pdev->dev,
 			  sizeof(struct xylonfb_layer_fix_data), GFP_KERNEL);
 	if (!fd) {
-		pr_err("failed allocate layer fix data (%d)\n", id);
+		dev_err(dev, "failed allocate layer fix data (%d)\n", id);
 		return -ENOMEM;
 	}
 
@@ -163,20 +167,20 @@ static int xylonfb_parse_layer_info(struct device_node *parent_dn,
 
 	ret = of_property_read_u32(dn, "address", &fd->address);
 	if (ret && (ret != -EINVAL)) {
-		pr_err("failed get address\n");
+		dev_err(dev, "failed get address\n");
 		return ret;
 	}
 	ret = of_property_read_u32_index(dn, "address", 1, &fd->address_range);
 
 	ret = of_property_read_u32(dn, "buffer-offset", &fd->buffer_offset);
 	if (ret && (ret != -EINVAL)) {
-		pr_err("failed get buffer-offset\n");
+		dev_err(dev, "failed get buffer-offset\n");
 		return ret;
 	}
 
 	ret = of_property_read_u32(dn, "bits-per-pixel", &fd->bpp);
 	if (ret) {
-		pr_err("failed get bits-per-pixel\n");
+		dev_err(dev, "failed get bits-per-pixel\n");
 		return ret;
 	}
 	switch (fd->bpp) {
@@ -185,13 +189,13 @@ static int xylonfb_parse_layer_info(struct device_node *parent_dn,
 	case 32:
 		break;
 	default:
-		pr_err("invalid bits-per-pixel value\n");
+		dev_err(dev, "invalid bits-per-pixel value\n");
 		return -EINVAL;
 	}
 
 	ret = of_property_read_string(dn, "type", &string);
 	if (ret) {
-		pr_err("failed get type\n");
+		dev_err(dev, "failed get type\n");
 		return ret;
 	}
 	if (!strcmp(string, "alpha")) {
@@ -201,14 +205,14 @@ static int xylonfb_parse_layer_info(struct device_node *parent_dn,
 	} else if (!strcmp(string, "yuv")) {
 		fd->type = LOGICVC_LAYER_YUV;
 	} else {
-		pr_err("unsupported layer type\n");
+		dev_err(dev, "unsupported layer type\n");
 		return -EINVAL;
 	}
 
 	if (fd->type != LOGICVC_LAYER_ALPHA) {
 		ret = of_property_read_string(dn, "transparency", &string);
 		if (ret) {
-			pr_err("failed get transparency\n");
+			dev_err(dev, "failed get transparency\n");
 			return ret;
 		}
 		if (!strcmp(string, "clut16")) {
@@ -220,7 +224,7 @@ static int xylonfb_parse_layer_info(struct device_node *parent_dn,
 		} else if (!strcmp(string, "pixel")) {
 			fd->transparency = LOGICVC_ALPHA_PIXEL;
 		} else {
-			pr_err("unsupported layer transparency\n");
+			dev_err(dev, "unsupported layer transparency\n");
 			return -EINVAL;
 		}
 	}
@@ -230,9 +234,9 @@ static int xylonfb_parse_layer_info(struct device_node *parent_dn,
 
 	fd->width = data->pixel_stride;
 
-	ret = xylonfb_layer_set_format(fd);
+	ret = xylonfb_layer_set_format(fd, dev);
 	if (ret) {
-		pr_err("failed set layer format\n");
+		dev_err(dev, "failed set layer format\n");
 		return ret;
 	}
 
@@ -244,6 +248,7 @@ static int xylonfb_parse_layer_info(struct device_node *parent_dn,
 static int xylon_parse_hw_info(struct device_node *dn,
 			       struct xylonfb_data *data)
 {
+	struct device *dev = &data->pdev->dev;
 	int ret;
 	const char *string;
 
@@ -252,7 +257,7 @@ static int xylon_parse_hw_info(struct device_node *dn,
 	ret = of_property_read_u32(dn, "background-layer-bits-per-pixel",
 				   &data->bg_layer_bpp);
 	if (ret && (ret != -EINVAL)) {
-		pr_err("failed get bg-layer-bits-per-pixel\n");
+		dev_err(dev, "failed get bg-layer-bits-per-pixel\n");
 		return ret;
 	} else if (ret == 0) {
 		data->flags |= XYLONFB_FLAGS_BACKGROUND_LAYER;
@@ -260,7 +265,7 @@ static int xylon_parse_hw_info(struct device_node *dn,
 		ret = of_property_read_string(dn, "background-layer-type",
 					      &string);
 		if (ret) {
-			pr_err("failed get bg-layer-type\n");
+			dev_err(dev, "failed get bg-layer-type\n");
 			return ret;
 		}
 		if (!strcmp(string, "rgb")) {
@@ -268,7 +273,7 @@ static int xylon_parse_hw_info(struct device_node *dn,
 		} else if (!strcmp(string, "yuv")) {
 			data->flags |= XYLONFB_FLAGS_BACKGROUND_LAYER_YUV;
 		} else {
-			pr_err("unsupported bg layer type\n");
+			dev_err(dev, "unsupported bg layer type\n");
 			return -EINVAL;
 		}
 	}
@@ -279,28 +284,28 @@ static int xylon_parse_hw_info(struct device_node *dn,
 	if (of_property_read_bool(dn, "readable-regs"))
 		data->flags |= XYLONFB_FLAGS_READABLE_REGS;
 	else
-		pr_info("logicvc registers not readable\n");
+		dev_warn(dev, "logicvc registers not readable\n");
 
 	if (of_property_read_bool(dn, "size-position"))
 		data->flags |= XYLONFB_FLAGS_SIZE_POSITION;
 	else
-		pr_info("logicvc size-position disabled\n");
+		dev_warn(dev, "logicvc size-position disabled\n");
 
 	ret = of_property_read_u32(dn, "pixel-stride", &data->pixel_stride);
 	if (ret) {
-		pr_err("failed get pixel-stride\n");
+		dev_err(dev, "failed get pixel-stride\n");
 		return ret;
 	}
 
 	ret = of_property_read_u32(dn, "power-delay", &data->pwr_delay);
 	if (ret && (ret != -EINVAL)) {
-		pr_err("failed get power-delay\n");
+		dev_err(dev, "failed get power-delay\n");
 		return ret;
 	}
 
 	ret = of_property_read_u32(dn, "signal-delay", &data->sig_delay);
 	if (ret && (ret != -EINVAL)) {
-		pr_err("failed get signal\n");
+		dev_err(dev, "failed get signal\n");
 		return ret;
 	}
 
@@ -308,6 +313,7 @@ static int xylon_parse_hw_info(struct device_node *dn,
 }
 
 static const struct of_device_id logicvc_of_match[] = {
+	{ .compatible = "xylon,logicvc-3.00.a" },
 	{ .compatible = "xylon,logicvc-4.00.a" },
 	{ .compatible = "xylon,logicvc-4.01.a" },
 	{ .compatible = "xylon,logicvc-4.01.b" },
@@ -318,26 +324,28 @@ static const struct of_device_id logicvc_of_match[] = {
 
 static int xylonfb_get_logicvc_configuration(struct xylonfb_data *data)
 {
+	struct device *dev = &data->pdev->dev;
 	struct device_node *dn = data->device;
 	const struct of_device_id *match;
+	struct videomode vm;
 	int i, ret;
 
 	XYLONFB_DBG(INFO, "%s", __func__);
 
 	match = of_match_node(logicvc_of_match, dn);
 	if (!match) {
-		pr_err("failed match logicvc\n");
+		dev_err(dev, "failed match logicvc\n");
 		return -ENODEV;
 	}
 
 	ret = of_address_to_resource(dn, 0, &data->resource_mem);
 	if (ret) {
-		pr_err("failed get mem resource\n");
+		dev_err(dev, "failed get mem resource\n");
 		return ret;
 	}
 	data->irq = of_irq_to_resource(dn, 0, &data->resource_irq);
 	if (data->irq == 0) {
-		pr_err("failed get irq resource\n");
+		dev_err(dev, "failed get irq resource\n");
 		return ret;
 	}
 
@@ -360,188 +368,78 @@ static int xylonfb_get_logicvc_configuration(struct xylonfb_data *data)
 		if (data->console_layer == data->layers)
 			data->console_layer--;
 
-		pr_info("invalid last layer configuration\n");
+		dev_warn(dev, "invalid last layer configuration\n");
 	}
 
-	xylonfb_init_ctrl(data, dn, &data->vm.ctrl);
+	memset(&vm, 0, sizeof(vm));
+
+	if (!(data->flags & XYLONFB_FLAGS_EDID_VMODE) &&
+	    (data->vm.name[0] == 0)) {
+		ret = of_get_videomode(dn, &vm, OF_USE_NATIVE_MODE);
+		if (!ret) {
+			fb_videomode_from_videomode(&vm, &data->vm.vmode);
+
+			sprintf(data->vm.name, "%dx%d",
+				data->vm.vmode.xres, data->vm.vmode.yres);
+
+			data->flags |= XYLONFB_FLAGS_VMODE_CUSTOM;
+		}
+	}
+
+	xylonfb_init_ctrl(dn, vm.flags, &data->vm.ctrl);
 
 	return 0;
 }
 
 static int xylonfb_get_driver_configuration(struct xylonfb_data *data)
 {
+	struct device *dev = &data->pdev->dev;
 	struct device_node *dn = data->pdev->dev.of_node;
-	struct device_node *disp_timings, *timings_dn;
-	struct fb_videomode *vm;
-	u32 val;
 	int ret;
 	const char *string;
-	char *vm_name;
 
 	XYLONFB_DBG(INFO, "%s", __func__);
 
 	data->device = of_parse_phandle(dn, "device", 0);
 	if (!data->device) {
-		pr_err("failed get device\n");
+		dev_err(dev, "failed get device\n");
 		return -ENODEV;
 	}
 
-	data->encoder = of_parse_phandle(dn, "encoder", 0);
-	if (!data->encoder)
-		pr_warn("no available encoder\n");
-
 	data->pixel_clock = of_parse_phandle(dn, "clocks", 0);
-	if (!data->pixel_clock)
-		pr_warn("no available clocks\n");
 
 	ret = of_property_read_u32(dn, "console-layer", &data->console_layer);
 	if (ret && (ret != -EINVAL)) {
-			pr_err("failed get console-layer\n");
+			dev_err(dev, "failed get console-layer\n");
 			return ret;
 	} else {
 		data->flags |= XYLONFB_FLAGS_CHECK_CONSOLE_LAYER;
 	}
 
+	if (of_property_read_bool(dn, "vsync-irq"))
+		data->flags |= XYLONFB_FLAGS_VSYNC_IRQ;
+
 	if (of_property_read_bool(dn, "edid-video-mode")) {
 		data->flags |= XYLONFB_FLAGS_EDID_VMODE;
 		if (of_property_read_bool(dn, "edid-print"))
 			data->flags |= XYLONFB_FLAGS_EDID_PRINT;
+//		return 0;
 	} else {
-		data->flags |= XYLONFB_FLAGS_ADV7511_SKIP;
+//Huh?  ADV7511 still needs initialising		data->flags |= XYLONFB_FLAGS_ADV7511_SKIP;
 	}
-
-	if (of_property_read_bool(dn, "vsync-irq"))
-		data->flags |= XYLONFB_FLAGS_VSYNC_IRQ;
 
 	ret = of_property_read_string(dn, "video-mode", &string);
 	if (ret && (ret != -EINVAL)) {
-		pr_err("failed get video-mode\n");
+		dev_err(dev, "failed get video-mode\n");
 		return ret;
 	} else if (ret == 0) {
 		strcpy(data->vm.name, string);
 		return 0;
 	}
 
-	disp_timings = of_find_node_by_name(dn, "display-timings");
-	if (disp_timings) {
-		vm = &data->vm.vmode;
-		vm_name = data->vm.name;
-
-		if (of_property_read_bool(disp_timings, "native-mode"))
-			timings_dn = of_parse_phandle(disp_timings,
-						      "native-mode", 0);
-		else
-			timings_dn = of_get_next_child(disp_timings, NULL);
-
-		strcpy(data->vm.name, timings_dn->name);
-
-		if (timings_dn) {
-			if (of_property_read_u32(timings_dn, "clock-frequency",
-						 &vm->pixclock)) {
-				pr_err("failed get clock-frequency\n");
-				goto node_put_param;
-			}
-			vm->pixclock = KHZ2PICOS(vm->pixclock / 1000);
-
-			if (of_property_read_u32(timings_dn, "hactive",
-						 &vm->xres)) {
-				pr_err("failed get hactive\n");
-				goto node_put_param;
-			}
-
-			if (of_property_read_u32(timings_dn, "vactive",
-						 &vm->yres)) {
-				pr_err("failed get vactive\n");
-				goto node_put_param;
-			}
-
-			if (of_property_read_u32(timings_dn, "hfront-porch",
-						 &vm->right_margin)) {
-				pr_err("failed get hfront-porch\n");
-				goto node_put_param;
-			}
-
-			if (of_property_read_u32(timings_dn, "hback-porch",
-						 &vm->left_margin)) {
-				pr_err("failed get hback-porch\n");
-				goto node_put_param;
-			}
-
-			if (of_property_read_u32(timings_dn, "hsync-len",
-						 &vm->hsync_len)) {
-				pr_err("failed get hsync-len\n");
-				goto node_put_param;
-			}
-
-			if (of_property_read_u32(timings_dn, "vfront-porch",
-						 &vm->lower_margin)) {
-				pr_err("failed get vfront-porch\n");
-				goto node_put_param;
-			}
-
-			if (of_property_read_u32(timings_dn, "vback-porch",
-						 &vm->upper_margin)) {
-				pr_err("failed get vback-porch\n");
-				goto node_put_param;
-			}
-
-			if (of_property_read_u32(timings_dn, "vsync-len",
-						 &vm->vsync_len)) {
-				pr_err("failed get vsync-len\n");
-				goto node_put_param;
-			}
-
-			ret = of_property_read_u32(timings_dn, "hsync-active",
-						 &val);
-			if (ret && (ret != -EINVAL)) {
-				pr_err("failed get hsync-active\n");
-				goto node_put_param;
-			} else if ((ret == 0) && (val == 0)) {
-				data->hw_flags |= LOGICVC_CTRL_HSYNC_INVERT;
-			}
-
-			ret = of_property_read_u32(timings_dn, "vsync-active",
-						 &val);
-			if (ret && (ret != -EINVAL)) {
-				pr_err("failed get vsync-active\n");
-				goto node_put_param;
-			} else if ((ret == 0) && (val == 0)) {
-				data->hw_flags |= LOGICVC_CTRL_VSYNC_INVERT;
-			}
-
-			ret = of_property_read_u32(timings_dn, "de-active",
-						 &val);
-			if (ret && (ret != -EINVAL)) {
-				pr_err("failed get de-active\n");
-				goto node_put_param;
-			} else if ((ret == 0) && (val == 0)) {
-				data->hw_flags |=
-					LOGICVC_CTRL_PIXEL_DATA_INVERT;
-			}
-
-			ret = of_property_read_u32(timings_dn,
-						   "pixelclk-active", &val);
-			if (ret && (ret != -EINVAL)) {
-				pr_err("failed get pixelclk-active\n");
-				goto node_put_param;
-			} else if ((ret == 0) && (val == 1)) {
-				data->hw_flags |=
-					LOGICVC_CTRL_PIXEL_DATA_TRIGGER_INVERT;
-			}
-
-			data->flags |= XYLONFB_FLAGS_VMODE_CUSTOM;
-node_put_param:
-			of_node_put(timings_dn);
-		}
-
-		of_node_put(disp_timings);
-	} else {
-		pr_info("default video mode\n");
-		return 0;
-	}
-
 	return 0;
 }
+
 
 static int xylonfb_probe(struct platform_device *pdev)
 {
@@ -553,7 +451,7 @@ static int xylonfb_probe(struct platform_device *pdev)
 	data = devm_kzalloc(&pdev->dev, sizeof(struct xylonfb_data),
 			     GFP_KERNEL);
 	if (!data) {
-		pr_err("failed allocate init data\n");
+		dev_err(&pdev->dev, "failed allocate init data\n");
 		return -ENOMEM;
 	}
 
@@ -596,7 +494,6 @@ static struct platform_driver xylonfb_driver = {
 	},
 };
 
-#ifndef MODULE
 static int xylonfb_get_params(char *options)
 {
 	char *this_opt;
@@ -613,11 +510,9 @@ static int xylonfb_get_params(char *options)
 	}
 	return 0;
 }
-#endif
 
 static int xylonfb_init(void)
 {
-#ifndef MODULE
 	char *option = NULL;
 	/*
 	 *  Kernel boot options (in 'video=xxxfb:<options>' format)
@@ -626,9 +521,8 @@ static int xylonfb_init(void)
 		return -ENODEV;
 	/* Set internal module parameters */
 	xylonfb_get_params(option);
-#endif
 	if (platform_driver_register(&xylonfb_driver)) {
-		pr_err("Error driver registration\n");
+		pr_err("failed %s driver registration\n", XYLONFB_DRIVER_NAME);
 		return -ENODEV;
 	}
 
@@ -640,12 +534,11 @@ static void __exit xylonfb_exit(void)
 	platform_driver_unregister(&xylonfb_driver);
 }
 
-#ifndef MODULE
-late_initcall(xylonfb_init);
-#else
+
+//TODO: Removed late_initcall from here, and some other #ifndef MODULE up higher.  If this breaks in-kernel put them back!
+
 module_init(xylonfb_init);
 module_exit(xylonfb_exit);
-#endif
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION(XYLONFB_DRIVER_DESCRIPTION);

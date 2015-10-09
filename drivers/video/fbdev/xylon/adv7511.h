@@ -45,4 +45,6 @@ struct adv7511_platform_data {
 	u32 cec_clk;
 };
 
+struct v4l2_subdev *adv7511_sd(struct v4l2_subdev *sd);
+
 #endif /* __ADV7511_H__ */

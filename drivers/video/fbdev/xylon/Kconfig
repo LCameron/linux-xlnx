@@ -5,6 +5,8 @@ menuconfig FB_XYLON
 	select FB_CFB_FILLRECT
 	select FB_CFB_COPYAREA
 	select FB_CFB_IMAGEBLIT
+	select FB_MODE_HELPERS
+	select VIDEOMODE_HELPERS
 	help
 	  Choose this option if you want to use the Xylon logiCVC as frame
 	  buffer device. Without the support of PCI & AGP.
@@ -23,6 +25,7 @@ config FB_XYLON_PIXCLK_LOGICLK
 	bool "Xylon logiCLK pixel clock generator"
 	depends on FB_XYLON && FB_XYLON_PIXCLK
 	default n
+	select COMMON_CLK_LOGICLK
 	help
 	  Support for controlling pixel clock generation from
 	  Xylon logiCLK FGPA IP core.
@@ -31,10 +34,8 @@ config FB_XYLON_PIXCLK_SI570
 	bool "SI570 pixel clock generator"
 	depends on FB_XYLON && FB_XYLON_PIXCLK
 	default n
-	select SYSFS
 	select I2C
-	select MISC_DEVICES
-	select SI570
+	select COMMON_CLK_SI570
 	help
 	  Support for controlling pixel clock generation from
 	  SI570 clock generator.
