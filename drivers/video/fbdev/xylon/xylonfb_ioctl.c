@@ -338,7 +338,7 @@ static int xylonfb_layer_geometry(struct fb_info *fbi,
 		width = layer_geometry->width;
 		height = layer_geometry->height;
 		xoff = layer_geometry->x_offset;
-		yoff = layer_geometry->y_offset;
+		yoff = layer_geometry->x_offset;
 
 		if ((x > xres) || (y > yres))
 			return -EINVAL;
@@ -380,10 +380,10 @@ static int xylonfb_layer_geometry(struct fb_info *fbi,
 						     ld);
 		}
 
-		data->reg_access.set_reg_val((width - 1), ld->base,
+		data->reg_access.set_reg_val((width - 1)  - layer_geometry->x_offset, ld->base,
 					     LOGICVC_LAYER_HSIZE_ROFF,
 					     ld);
-		data->reg_access.set_reg_val((height - 1), ld->base,
+		data->reg_access.set_reg_val((height - 1)  - layer_geometry->y_offset, ld->base,
 					     LOGICVC_LAYER_VSIZE_ROFF,
 					     ld);
 		data->reg_access.set_reg_val((xres - (x + 1)), ld->base,
@@ -418,12 +418,12 @@ static int xylonfb_layer_geometry(struct fb_info *fbi,
 		layer_geometry->width =
 			data->reg_access.get_reg_val(ld->base,
 						     LOGICVC_LAYER_HSIZE_ROFF,
-						     ld);
+						     ld) + layer_geometry->x_offset;
 		layer_geometry->width += 1;
 		layer_geometry->height =
 			data->reg_access.get_reg_val(ld->base,
 						     LOGICVC_LAYER_VSIZE_ROFF,
-						     ld);
+						     ld) + layer_geometry->y_offset;
 		layer_geometry->height += 1;
 	}
 
@@ -621,6 +621,8 @@ int xylonfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 						  ((ld->triple_buffer_active_number * triple_buffer_offset) * fix->width *(fix->bpp / 8));
 			data->reg_access.set_reg_val(ld->fb_pbase_active, ld->base,
 							 LOGICVC_LAYER_ADDR_ROFF, ld);
+			XYLONFB_DBG(INFO, "XYLONFB_LAYER_BUFFER %d %08x %08x", buffer_number, ld->base,ld->fb_pbase_active );
+
 		} else {
 			if (copy_from_user(&ioctl.layer_buff, argp,
 					   sizeof(ioctl.layer_buff)))
